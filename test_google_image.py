@@ -12,6 +12,7 @@ import urllib.parse
 
 # PIP modules
 import PIL.Image
+#pip3 install google-api-python-client
 import googleapiclient.http
 import googleapiclient.discovery
 from google.oauth2.service_account import Credentials
@@ -45,6 +46,36 @@ api_key_file = "service_key.json"
 credentials = Credentials.from_service_account_file(api_key_file, scopes=['https://www.googleapis.com/auth/drive.readonly'])
 service = googleapiclient.discovery.build('drive', 'v3', credentials=credentials)
 
+
+def multi_trim(image):
+	"""
+	Iteratively trims borders around an image until its dimensions no longer change,
+	similar to ImageMagick's trim function applied multiple times.
+
+	Parameters:
+	- image: A PIL Image object to be trimmed.
+
+	Returns:
+	- A PIL Image object with all removable borders trimmed.
+	"""
+	while True:
+		original_size = image.size
+		bbox = image.getbbox()
+
+		if not bbox:
+			# No further trimming is possible if no bounding box is found.
+			break
+
+		trimmed_image = image.crop(bbox)
+
+		if trimmed_image.size == original_size:
+			# If the image size hasn't changed, all removable borders have been trimmed.
+			break
+
+		image = trimmed_image  # Prepare for the next iteration, if needed.
+
+	return image
+
 def calculate_md5(image_data) -> str:
 	"""
 	Calculate the MD5 hash of an image's pixel data, excluding metadata
@@ -59,8 +90,12 @@ def calculate_md5(image_data) -> str:
 	str
 		MD5 hash of the image's pixel data
 	"""
-	img = PIL.Image.open(image_data)
-	pixel_data = img.tobytes()
+	pil_image = PIL.Image.open(image_data)
+	# Ensure the image is in RGB mode
+	if pil_image.mode != 'RGB':
+		pil_image = pil_image.convert('RGB')
+	pil_image = multi_trim(pil_image)
+	pixel_data = pil_image.tobytes()
 	return hashlib.md5(pixel_data).hexdigest()
 
 def calculate_phash(image_data, hash_size: int = 16) -> str:
@@ -79,8 +114,12 @@ def calculate_phash(image_data, hash_size: int = 16) -> str:
 	str
 		Perceptual hash of the image
 	"""
-	img = PIL.Image.open(image_data)
-	return str(imagehash.phash(img, hash_size=hash_size))
+	pil_image = PIL.Image.open(image_data)
+	# Ensure the image is in RGB mode
+	if pil_image.mode != 'RGB':
+		pil_image = pil_image.convert('RGB')
+	pil_image = multi_trim(pil_image)
+	return str(imagehash.phash(pil_image, hash_size=hash_size))
 
 def download_image(file_id, service):
 	# Initialize the file request for downloading the image
@@ -89,7 +128,15 @@ def download_image(file_id, service):
 	# Get the file metadata to retrieve the filename
 	file_metadata = service.files().get(fileId=file_id).execute()
 	filename = file_metadata['name'].lower()
+	mime_parts = file_metadata['mimeType'].split('/')
+	if mime_parts[0] != 'image':
+		print(file_metadata)
+		raise TypeError
 	filename = filename.replace(' ', '_')
+	if not filename.endswith(mime_parts[1]):
+		print(file_metadata)
+		filename = filename + "." + mime_parts[1]
+		#raise TypeError
 	try:
 		import rmspaces
 		filename = rmspaces.cleanName(filename)
@@ -154,7 +201,12 @@ def name_corner_colors(corner_pixels: dict) -> dict:
 	dict
 		Dictionary containing corner names and their closest named colors.
 	"""
-	named_colors_dict = {corner: closest_color(rgb) for corner, rgb in corner_pixels.items()}
+	named_colors_dict = {}
+	for corner, rgb in corner_pixels.items():
+		if not isinstance(rgb, tuple):
+			named_colors_dict[corner] = None
+			raise TypeError
+		named_colors_dict[corner] = closest_color(rgb)
 	consensus = None
 	for pixel_key in named_colors_dict.keys():
 		color_name = named_colors_dict[pixel_key]
@@ -210,6 +262,7 @@ def normalize_google_drive_url(image_url: str) -> str:
 def get_pixel_data(pil_image):
 	# Get the dimensions
 	width, height = pil_image.size
+	print(f"IMAGE {width}, {height}")
 
 	# Get corner pixels: Top-left, Top-right, Bottom-left, Bottom-right
 	corner_pixels_dict = {
@@ -280,8 +333,6 @@ def download_image_and_inspect(image_url: str) -> tuple:
 
 	file_id = get_file_id_from_google_drive_url(image_url)
 	image_data, filename = download_image(file_id, service)
-	phash = calculate_phash(image_data)
-	md5hash = calculate_md5(image_data)
 
 	time.sleep(random.random() / 10)
 	#print(image_data)
@@ -290,12 +341,21 @@ def download_image_and_inspect(image_url: str) -> tuple:
 	pil_image = PIL.Image.open(image_data)
 	#print(pil_image)
 
-	# Get the file format from PIL (for image files)
-	image_format = pil_image.format
+	# Ensure the image is in RGB mode
+	if pil_image.mode != 'RGB':
+		print(f"Wrong image mode {pil_image.mode}")
+		time.sleep(1)
+		pil_image = pil_image.convert('RGB')
 
 	named_corner_pixels_dict = get_pixel_data(pil_image)
 
-	return image_format, named_corner_pixels_dict, filename, phash, md5hash, image_data
+	return named_corner_pixels_dict, filename, image_data
+
+
+def get_hash_data(image_data):
+	phash = calculate_phash(image_data)
+	md5hash = calculate_md5(image_data)
+	return phash, md5hash
 
 
 # Test the function
