@@ -56,6 +56,7 @@ def read_student_csv_data(input_csv: str, config: dict) -> list:
 				index = csv_question_dict['csv_column']
 				name = csv_question_dict['name'].strip()
 				student_entry[name] = row_list[index-1].strip()
+			student_entry['Protein Image Number'] = config['image number']
 
 			student_entry['Warnings'] = []
 			# Add the student_entry to student_tree

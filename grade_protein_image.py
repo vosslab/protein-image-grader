@@ -19,6 +19,8 @@ from tool_scripts import process_images
 from tool_scripts import file_io_protein
 from tool_scripts import timestamp_tools
 from tool_scripts import student_id_protein
+from tool_scripts import duplicate_processing
+
 
 console = Console()
 warning_color = Style(color="rgb(255, 187, 51)" )  # RGB for bright orange
@@ -372,11 +374,16 @@ def parse_and_prepare() -> dict:
 	"""
 	args = parse_args()
 	image_number = args.image_number
-	folder = f"IMAGE_{image_number:02d}"
 
+	folder = f"IMAGE_{image_number:02d}"
 	# Ensure the folder exists
 	if not os.path.isdir(folder):
 		os.mkdir(folder)
+
+	image_folder = f"DOWNNLOAD_{image_number:02d}"
+	# Ensure the folder exists
+	if not os.path.isdir(image_folder):
+		os.mkdir(image_folder)
 
 	# Construct file paths
 	config_yaml = f"YAML_files/protein_image_{image_number:02d}.yml"
@@ -391,6 +398,7 @@ def parse_and_prepare() -> dict:
 		"args": args,
 		"image_number": image_number,
 		"folder": folder,
+		"image_folder": image_folder,
 		"config_yaml": config_yaml,
 		"input_csv": input_csv,
 		"output_csv": output_csv,
@@ -575,7 +583,17 @@ def process_data(student_tree: list, params: dict, read_only_config_dict: dict) 
 	"""
 	global console
 	console.print("\nPre-Processing Student Images", style=data_color)
-	process_images.pre_process_student_images(student_tree)
+	console.print("\nDownloading and Reading Student Images", style=data_color)
+	process_images.read_and_save_student_images(student_tree, params)
+	# Save backup of the student_tree
+	download_save_yaml = os.path.join(params["folder"], "downloaded_images.yml")
+	file_io_protein.backup_tree_to_yaml(download_save_yaml, student_tree)
+
+	console.print("\nChecking Student Images for Duplicates", style=data_color)
+	duplicate_processing.check_duplicate_images(student_tree, params)
+	# Save backup of the student_tree
+	duplicate_check_save_yaml = os.path.join(params["folder"], "duplicate_check_save.yml")
+	file_io_protein.backup_tree_to_yaml(duplicate_check_save_yaml, student_tree)
 
 	# Loop through each student entry and process timestamp due dates
 	console.print("\nPre-Processing Turn In Date", style=data_color)

@@ -49,7 +49,6 @@ api_key_file = "service_key.json"
 credentials = Credentials.from_service_account_file(api_key_file, scopes=['https://www.googleapis.com/auth/drive.readonly'])
 service = googleapiclient.discovery.build('drive', 'v3', credentials=credentials)
 
-
 #============================================
 
 def get_background_color(image: Image.Image) -> tuple:
@@ -135,6 +134,8 @@ def multi_trim(image: Image.Image, tolerance: int = 0) -> Image.Image:
 
 	return image
 
+#============================================
+
 def calculate_md5(image_data) -> str:
 	"""
 	Calculate the MD5 hash of an image's pixel data, excluding metadata
@@ -156,6 +157,8 @@ def calculate_md5(image_data) -> str:
 	pil_image = multi_trim(pil_image)
 	pixel_data = pil_image.tobytes()
 	return hashlib.md5(pixel_data).hexdigest()
+
+#============================================
 
 def calculate_phash(image_data, hash_size: int = 16) -> str:
 	"""
@@ -180,46 +183,7 @@ def calculate_phash(image_data, hash_size: int = 16) -> str:
 	pil_image = multi_trim(pil_image)
 	return str(imagehash.phash(pil_image, hash_size=hash_size))
 
-def download_image(file_id, service):
-	# Initialize the file request for downloading the image
-	request = service.files().get_media(fileId=file_id)
-
-	# Get the file metadata to retrieve the filename
-	file_metadata = service.files().get(fileId=file_id).execute()
-	filename = file_metadata['name'].lower()
-	mime_parts = file_metadata['mimeType'].split('/')
-	if mime_parts[0] != 'image':
-		print(file_metadata)
-		raise TypeError
-	filename = filename.replace(' ', '_')
-	if not filename.endswith(mime_parts[1]):
-		print(file_metadata)
-		filename = filename + "." + mime_parts[1]
-		#raise TypeError
-	try:
-		import rmspaces
-		filename = rmspaces.cleanName(filename)
-	except ImportError:
-		pass
-
-	# Use an in-memory byte stream to hold the downloaded file
-	file_data = io.BytesIO()
-
-	# Initialize downloader
-	downloader = googleapiclient.http.MediaIoBaseDownload(file_data, request)
-
-	# Perform the download in chunks
-	done = False
-	while not done:
-		status, done = downloader.next_chunk()
-		time.sleep(random.random() / 100.)
-
-	# Reset stream position to start
-	file_data.seek(0)
-
-	# Return the byte stream and filename to caller
-	return file_data, filename
-
+#============================================
 
 def closest_color(rgb: tuple) -> str:
 	"""
@@ -244,7 +208,7 @@ def closest_color(rgb: tuple) -> str:
 		min_colors[name] = rd + gd + bd
 	return min(min_colors, key=min_colors.get)
 
-
+#============================================
 # Modify the corner_pixels dictionary to include named colors
 def name_corner_colors(corner_pixels: dict) -> dict:
 	"""
@@ -277,6 +241,8 @@ def name_corner_colors(corner_pixels: dict) -> dict:
 	named_colors_dict['consensus'] = consensus
 	return named_colors_dict
 
+#============================================
+
 def get_file_id_from_google_drive_url(image_url: str) -> str:
 	# Parse the URL to get its components
 	url_parts = urllib.parse.urlparse(image_url)
@@ -292,10 +258,11 @@ def get_file_id_from_google_drive_url(image_url: str) -> str:
 		return None
 
 	return file_id
-
 # Simple assertion test for the function: 'normalize_google_drive_url'
 result = get_file_id_from_google_drive_url("https://drive.google.com/u/2/open?usp=forms_web&id=1QCHoMnqKvf6gqLI272ZQ4IGBCFupnC6s")
 assert result == "1QCHoMnqKvf6gqLI272ZQ4IGBCFupnC6s"
+
+#============================================
 
 def normalize_google_drive_url(image_url: str) -> str:
 	"""
@@ -318,6 +285,8 @@ def normalize_google_drive_url(image_url: str) -> str:
 	direct_download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
 	return direct_download_url
 
+#============================================
+
 def get_pixel_data(pil_image):
 	# Get the dimensions
 	width, height = pil_image.size
@@ -333,6 +302,7 @@ def get_pixel_data(pil_image):
 	named_corner_pixels_dict = name_corner_colors(corner_pixels_dict)
 	return named_corner_pixels_dict
 
+#============================================
 
 def send_http_request(url: str, session_data=None):
 	sys.exit(1)
@@ -370,6 +340,72 @@ def send_http_request(url: str, session_data=None):
 	return response, session_data
 
 
+#============================================
+
+def download_image(file_id):
+	global service
+	# Initialize the file request for downloading the image
+	request = service.files().get_media(fileId=file_id)
+
+	# Get the file metadata to retrieve the filename
+	file_metadata = service.files().get(fileId=file_id).execute()
+	filename = file_metadata['name'].lower()
+	mime_parts = file_metadata['mimeType'].split('/')
+	if mime_parts[0] != 'image':
+		print(file_metadata)
+		raise TypeError
+	filename = filename.replace(' ', '_')
+	if not filename.endswith(mime_parts[1]):
+		print(file_metadata)
+		filename = filename + "." + mime_parts[1]
+		#raise TypeError
+	try:
+		import rmspaces
+		filename = rmspaces.cleanName(filename)
+	except ImportError:
+		pass
+
+	# Use an in-memory byte stream to hold the downloaded file
+	file_data = io.BytesIO()
+
+	# Initialize downloader
+	downloader = googleapiclient.http.MediaIoBaseDownload(file_data, request)
+
+	# Perform the download in chunks
+	done = False
+	while not done:
+		status, done = downloader.next_chunk()
+		time.sleep(random.random() / 100.)
+
+	# Reset stream position to start
+	file_data.seek(0)
+	time.sleep(random.random() / 10)
+
+	# Return the byte stream and filename to caller
+	return file_data, filename
+
+#============================================
+
+def inspect_image_data(image_data) -> tuple:
+	"""
+	return its file type, corner pixel RGB values, and updated session data.
+	"""
+	# Create a PIL Image object from the downloaded data
+	pil_image = PIL.Image.open(image_data)
+
+	# Ensure the image is in RGB mode
+	if pil_image.mode != 'RGB':
+		print(f"Wrong image mode {pil_image.mode}")
+		time.sleep(1)
+		pil_image = pil_image.convert('RGB')
+
+	named_corner_pixels_dict = get_pixel_data(pil_image)
+	image_data.seek(0)
+
+	return named_corner_pixels_dict
+
+#============================================
+
 def download_image_and_inspect(image_url: str) -> tuple:
 	"""
 	Download an image from Google Drive and return its file type, corner pixel RGB values, and updated session data.
@@ -389,9 +425,10 @@ def download_image_and_inspect(image_url: str) -> tuple:
 	# Download the image using the session
 	#response, session_data = send_http_request(direct_download_url)
 	#image_data = io.BytesIO(response.content)
+	raise NotImplementedError
 
 	file_id = get_file_id_from_google_drive_url(image_url)
-	image_data, filename = download_image(file_id, service)
+	image_data, filename = download_image(file_id)
 
 	time.sleep(random.random() / 10)
 	#print(image_data)
@@ -410,12 +447,14 @@ def download_image_and_inspect(image_url: str) -> tuple:
 
 	return named_corner_pixels_dict, filename, image_data
 
+#============================================
 
 def get_hash_data(image_data):
 	phash = calculate_phash(image_data)
 	md5hash = calculate_md5(image_data)
 	return phash, md5hash
 
+#============================================
 
 # Test the function
 if __name__ == "__main__":
@@ -423,7 +462,7 @@ if __name__ == "__main__":
 	file_id = '1QCHoMnqKvf6gqLI272ZQ4IGBCFupnC6s'
 
 	# Download the file
-	file_data, filename = download_image(file_id, service)
+	file_data, filename = download_image(file_id)
 
 	# Replace the Google Drive URL with a valid one
 	session_data = None
