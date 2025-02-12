@@ -1,25 +1,26 @@
+#!/usr/bin/env python3
+
 import os
 import sys
 import glob
-import time
 import commonlib
 from rich.console import Console
 from rich.style import Style
-
 from PIL import Image
-
-from tool_scripts import file_io_protein
 from tool_scripts import test_google_image
 from tool_scripts import student_id_protein
 
 console = Console()
 warning_color = Style(color="rgb(255, 187, 51)")  # RGB for bright orange
-question_color = Style(color="rgb(100, 149, 237)" )  # RGB for cornflower blue
 data_color = Style(color="rgb(187, 51, 255)")  # RGB for purple
 
+download_count = 0
+
 #============================================
-def download_and_process_image(student_entry: dict, params: dict) -> dict:
-	"""Download and process an image, storing metadata in a dictionary."""
+def get_image_data(student_entry: dict, params: dict):
+	"""Download or load an image from cache, ensuring consistency."""
+	global download_count
+
 	image_url = student_entry.get('image url')
 	if image_url is None:
 		console.print("  \aError: Image URL not found", style="bright_red")
@@ -31,37 +32,57 @@ def download_and_process_image(student_entry: dict, params: dict) -> dict:
 		f"{student_entry['Last Name'].replace(' ', '_')}-"
 	)
 	output_filename_prefix = os.path.join(params['image_folder'], output_filename_prefix)
+
 	file_search = glob.glob(output_filename_prefix+"*")
+	image_data = None
+	output_filename = None
+	original_filename = None
+
 	if len(file_search) == 0:
 		file_id = test_google_image.get_file_id_from_google_drive_url(image_url)
-		image_data, filename = test_google_image.download_image(file_id)
+		image_data, original_filename = test_google_image.download_image(file_id)
+		download_count += 1
+		output_filename = os.path.join(params['image_folder'], original_filename)
+
 	elif len(file_search) > 1:
 		raise ValueError(f"Too many matches for file {output_filename_prefix}")
-	else:
-		filename = file_search[0]
-		student_entry['Output Filename'] = filename
-		original_name = filename[len(output_filename_prefix):]
-		student_entry['Original Filename'] = original_name
-		image_data = open(filename, 'rb')
-	named_corner_pixels_dict = test_google_image.inspect_image_data(image_data)
-	phash, md5hash = test_google_image.get_hash_data(image_data)
 
-	image_data.seek(0)  # Reset stream position
+	else:
+		output_filename = file_search[0]
+		original_filename = output_filename[len(output_filename_prefix):]
+		print(f"Found file {output_filename}")
+		image_data = open(output_filename, 'rb')
+
+	return image_data, original_filename, output_filename
+
+#============================================
+def create_image_dict(image_data, original_filename, output_filename):
+	"""Process image metadata and create a dictionary of attributes."""
+	named_corner_pixels_dict = test_google_image.inspect_image_data(image_data)
+	if named_corner_pixels_dict is None:
+		console.print("  Error: Image metadata not found, possibly corrupt file.")
+		raise ValueError
+
+	phash, md5hash = test_google_image.get_hash_data(image_data)
+	image_data.seek(0)
 	pil_image = Image.open(image_data)
 
 	image_format = pil_image.format
 	image_mode = pil_image.mode
 
 	if image_format is None:
-		console.print(image_url)
-		console.print(test_google_image.normalize_google_drive_url(image_url))
-		console.print("  \aError: with this student's image, format not found.", style="bright_red")
-		console.print("  \aLikely Google Drive permissions error", style="bright_red")
+		console.print("  \aError: Image format not found, possibly permission issue.", style="bright_red")
 		raise TypeError
+
+	if image_format != 'PNG':
+		console.print(f"  WARNING: image is not type PNG, it is: {image_format}", style=warning_color)
+	if image_mode != 'RGB':
+		console.print(f"  WARNING: image is not mode RGB, it is: {image_mode}", style=warning_color)
 
 	image_dict = {
 		'pil_image': pil_image,
-		'filename': filename,
+		'original_filename': original_filename,
+		'output_filename': output_filename,
 		'image_format': image_format,
 		'image_mode': image_mode,
 		'phash': phash,
@@ -72,26 +93,54 @@ def download_and_process_image(student_entry: dict, params: dict) -> dict:
 	return image_dict
 
 #============================================
+def download_and_process_image(student_entry: dict, params: dict) -> dict:
+	"""Wrapper function to download/load an image and process it."""
+	image_data, original_filename, output_filename = get_image_data(student_entry, params)
+	image_dict = create_image_dict(image_data, original_filename, output_filename)
+
+	student_entry.update({
+		'Original Filename': original_filename,
+		'Output Filename': output_filename,
+		'128-bit MD5 Hash': image_dict['md5hash'],
+		'Perceptual Hash': image_dict['phash'],
+		'Image Format': image_dict['image_format'],
+		'Consensus Background Color': image_dict['named_corner_pixels_dict']['consensus']
+	})
+
+	return image_dict
+
+#============================================
 def generate_output_filename(student_entry: dict, filename: str, params: dict) -> str:
 	"""Generate a sanitized output filename for the student's image."""
 	clib = commonlib.CommonLib()
+
+	# Convert filename to lowercase
 	filename = filename.lower()
-	basename = os.path.splitext(filename.lower())[0]
+
+	# Raise an error if filename starts with "download_"
+	if filename.startswith("download_"):
+		raise ValueError
+
+	# Clean filename and extract extension
+	basename = os.path.splitext(filename)[0]
 	basename = clib.cleanName(basename)
 	extension = os.path.splitext(filename)[-1]
+
+	# Construct the output filename
 	output_filename = (
 		f"{student_entry['Student ID']}-"
 		f"{student_entry['First Name'].replace(' ', '_')}_"
 		f"{student_entry['Last Name'].replace(' ', '_')}-"
 		f"{basename}{extension}"
-		)
-	goodchars = set(
-			'-._'
-			+ '0123456789'
-			+ 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-			+ 'abcdefghijklmnopqrstuvwxyz')
+	)
+
+	# Ensure filename contains only allowed characters
+	goodchars = set('-._0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
 	output_filename = ''.join(c if c in goodchars else '_' for c in output_filename)
+
+	# Construct full file path
 	output_filename = os.path.join(params['image_folder'], output_filename)
+
 	return output_filename
 
 #============================================
@@ -105,308 +154,28 @@ def save_image(image_dict: dict, output_filename: str):
 def read_and_save_student_images(student_tree: list, params: dict) -> None:
 	"""Process student images, checking for duplicates and updating student entries."""
 	global console
+	global download_count
+
+	skip_count = 0
+	processed_count = 0
 	for student_entry in student_tree:
+		# Skip if image format already exists
 		if student_entry.get("Image Format") is not None:
+			skip_count += 1
 			continue
 
+		processed_count += 1
 		student_id_protein.print_student_info(student_entry)
 		image_dict = download_and_process_image(student_entry, params)
 
-		console.print(f"Processing image: {image_dict['filename']}")
-		if image_dict['image_format'] != 'PNG':
-			console.print(f"  WARNING: image is not type PNG, it is: {image_dict['image_format']}", style=warning_color)
-		if image_dict['image_mode'] != 'RGB':
-			console.print(f"  WARNING: image is not mode RGB, it is: {image_dict['image_mode']}", style=warning_color)
+		console.print(f"Processing image: {image_dict['original_filename']}")
 
-		output_filename = generate_output_filename(student_entry, image_dict['filename'], params)
-		student_entry.update({
-			'128-bit MD5 Hash': image_dict['md5hash'],
-			'Perceptual Hash': image_dict['phash'],
-			'Original Filename': image_dict['filename'],
-			'Image Format': image_dict['image_format'],
-			'Output Filename': output_filename,
-			'Consensus Background Color': image_dict['named_corner_pixels_dict']['consensus']
-		})
-
-		save_image(image_dict, output_filename)
+		# Ensure the image is saved if it's new
+		if not os.path.exists(image_dict['output_filename']):
+			save_image(image_dict, image_dict['output_filename'])
 
 	console.print("=============================")
-	console.print("\nChecking Student Images for Matches", style=data_color)
-
+	console.print(f"skipped {skip_count} of {len(student_tree)}")
+	console.print(f"downloaded {download_count} of {processed_count}")
 	console.print('DONE\n\n', style="bright_green")
 	return
-
-
-#============================
-class process_image_questions_class():
-	def __init__(self, student_tree, read_only_config_dict):
-		self.student_tree = student_tree
-		self._read_only_config_dict = read_only_config_dict
-
-	#==========================================
-	def process_all_student_images(self):
-		for student_entry in self.student_tree:
-			self.process_image_questions(student_entry)
-
-	#==========================================
-	def quick_process_initial_image_validation(self, student_entry: dict, validation: str) -> bool:
-		"""
-		Process initial image validation based on the user's input and update the student's record accordingly.
-
-		Parameters
-		----------
-		student_entry : dict
-			The student information dictionary, which will be updated based on the image validation status.
-		validation : str
-			The user's input for validation, typically a single character like 'b', 'y', or 's'.
-
-		Returns
-		-------
-		bool
-			Returns True if the image status was either "Bonus" or "Correct", otherwise returns False.
-		"""
-		# Check if the validation input is 'b' for Bonus.
-		if validation == 'b':
-			console.print("!! BONUS !!")
-			# Update the student's record with bonus information.
-			student_entry.update({
-				"Protein Image Status": "Bonus",
-				"Protein Image Deduction": 0.0,
-				"Protein Image Feedback": "Your image was one of the best in class"
-			})
-			return True
-		# Check if the validation input is 'y' for Yes (Correct).
-		elif validation == 'y':
-			# Update the student's record with correct image status.
-			student_entry.update({
-				"Protein Image Status": "Correct",
-				"Protein Image Deduction": 0.0,
-				"Protein Image Feedback": "Good Job!"
-			})
-			return True
-		elif validation == 'a':
-			# Update the student's record with correct image status.
-			student_entry.update({
-				"Protein Image Status": "Minor",
-				"Protein Image Deduction": 0.0,
-				"Protein Image Feedback": "Minor corrections needed, no point deducted, see other comments"
-			})
-			return False
-		elif validation == 'n':
-			# Update the student's record with correct image status.
-			student_entry.update({
-				"Protein Image Status": "Major",
-				"Protein Image Deduction": 0.0,
-				"Protein Image Feedback": "Major corrections needed, see other comments for points lost"
-			})
-			return False
-		# If validation input is none of the above, return False.
-		return False
-
-	# Validate function behavior
-	#student_dict = {"Protein Image Status": "", "Protein Image Deduction": "", "Protein Image Feedback": ""}
-	#assert self.quick_process_initial_image_validation(student_dict, 'b') == True
-	#assert student_dict["Protein Image Status"] == "Bonus"
-
-	#==========================================
-	def save_and_exit(self) -> None:
-		# Temporary backup of the student_tree
-		file_io_protein.backup_tree_to_yaml("force_exit_save.yml", self.student_tree)
-		time.sleep(0.1)
-		sys.exit(0)
-
-	#==========================================
-	def make_question_incorrect(self, student_entry: dict, q_name: str, almost: bool=False) -> None:
-		# Update the student's record based on the question
-		question_dict = self.image_questions_dict[q_name]
-		point_deduction = question_dict.get('point_deduction', 0)
-		if almost is True:
-			point_deduction = round(float(point_deduction) / 2.0, 1)
-		student_entry.update({
-			f"{q_name} Status": "Incorrect",
-			f"{q_name} Deduction": float(point_deduction),
-			f"{q_name} Feedback": question_dict.get('feedback', ''),
-		})
-		if almost is True:
-			student_entry[f"{q_name} Feedback"] = (
-				"Your image was close but not quite correct, "
-				+ "only half of normal points were deducted. "
-				+ student_entry[f"{q_name} Feedback"])
-		if isinstance(student_entry[f"{q_name} Deduction"], tuple):
-			console.print("MAJOR ERROR TUPLE VALUE", style='bright_red')
-			student_entry["{q_name} Deduction"] = student_entry["{q_name} Deduction"][0]
-			console.print(q_name)
-			console.print(question_dict.get('point_deduction'))
-			self.save_and_exit()
-
-	#==========================================
-	def make_question_correct(self, student_entry: dict, q_name: str) -> None:
-		# Update the student's record based on the question
-		student_entry.update({
-			f"{q_name} Status": "Correct",
-			f"{q_name} Deduction": 0,
-			f"{q_name} Feedback": "",
-		})
-
-	#==========================================
-	def process_image_question_list(self, student_entry: dict, almost_mode: bool) -> None:
-		"""
-		Process a list of image-related questions and update the student_entry dictionary based on the answers.
-
-		Parameters
-		----------
-		student_entry : dict
-			The dictionary containing the student's information and results. This will be updated with the
-			validation results for each question.
-		image_questions : list
-			A list of dictionaries. Each dictionary represents an image-related question and its associated data.
-		almost_mode : bool
-			A flag to indicate whether to skip questions with non-zero point_deduction.
-
-		Returns
-		-------
-		None
-			This function modifies the student_entry dictionary in-place but does not return anything.
-		"""
-		# Fetch the list of image questions from the _read_only_config_dict dictionary
-		image_questions = self._read_only_config_dict["image_questions"]
-
-		# Calculate the total number of questions
-
-		# Initialize the loop index
-		i = 0
-		total_q = len(image_questions)
-
-		# Loop through each question dictionary in image_questions
-		while i < total_q:
-			question_dict = image_questions[i]
-			# Extract the name of the question
-			q_name = question_dict['name']
-
-			# Skip the question if almost_mode is True and the point_deduction is not zero.
-			if almost_mode is True and question_dict['point_deduction'] != 0:
-				i += 1
-				continue
-
-			message = f"* Assessment {i+1}/{total_q}: {q_name}"
-
-			# Skip if already graded, but update deduction if wrong
-			status = student_entry.get(f"{q_name} Status")
-			if status is not None:
-				console.print(f'{message}: DONE {status}', style=brown_color)
-				if student_entry.get(f"{q_name} Status") == "Incorrect":
-					student_entry[f"{q_name} Deduction"] = question_dict.get('point_deduction', 0)
-				i += 1
-				continue
-
-			# Formulate the message to be displayed for input validation
-			validation = student_id_protein.get_input_validation(message, 'ynpasf', question_color)
-
-			if validation == 'p':
-				# If 'p' is entered, move back one step (Previous) if not at the beginning
-				if i > 0:
-					prev_question_dict = image_questions[i-1]
-					prev_q_name = prev_question_dict['name']
-					student_entry[f"{prev_q_name} Status"] = None
-					i -= 1
-				continue
-			elif validation == 'f':
-				# Update variables if the validation is 'f' for Finish
-				i = total_q
-				continue
-			elif validation == 'y':
-				# Update variables if the validation is 'y' for Yes
-				self.make_question_correct(student_entry, q_name)
-			elif validation == 'n':
-				# Update variables if the validation is 'n' for No
-				self.make_question_incorrect(student_entry, q_name, almost=False)
-			elif validation == 'a':
-				# Update variables if the validation is 'n' for No
-				self.make_question_incorrect(student_entry, q_name, almost=True)
-			elif validation == 's':
-				# Update variables if the validation is 's' for Save and exit
-				self.save_and_exit()
-
-			# Move to the next question
-			i += 1
-		return
-
-
-	#==========================================
-	def process_image_questions(self, student_entry: dict) -> None:
-		"""
-		Process answers for image-based questions and update the student's entry accordingly.
-
-		Parameters
-		----------
-		student_entry : dict
-			The dictionary containing the student's information and results. This will be updated with the
-			validation results.
-
-		Returns
-		-------
-		None
-			This function modifies the student_entry dictionary in-place but does not return anything.
-		"""
-
-		# Print student information using the provided function
-		student_id_protein.print_student_info(student_entry)
-
-		# Skip this student if it has already been graded
-		if student_entry.get('Image Assessment Complete') is True:
-			return
-
-		validation = None
-		consensus_background_color = student_entry['Consensus Background Color']
-		self.image_questions_dict = { q['name']: q for q in self._read_only_config_dict['image_questions'] }
-
-		image_format = student_entry['Image Format']
-		if image_format != 'PNG':
-			console.print(f"\nWARNING: image is not type PNG, it is: {image_format}", style=warning_color)
-			validation = 'n'
-			self.make_question_incorrect(student_entry, "File type is PNG, not JPEG or something else")
-		else:
-			self.make_question_correct(student_entry, "File type is PNG, not JPEG or something else")
-
-		exact_match = student_entry['Exact Match']
-		if exact_match is False:
-			self.make_question_correct(student_entry, "Unique image, not same as another student")
-		else:
-			console.print("\n\aWARNING: image has exact match", style=warning_color)
-			validation = 'n'
-			self.make_question_incorrect(student_entry, "Unique image, not same as another student")
-
-		if consensus_background_color is None or consensus_background_color != "White":
-			console.print("\nWARNING: image likely does not have White Background", style=warning_color)
-			console.print(f"Consensus Background Color: {consensus_background_color}")
-			if self._read_only_config_dict.get('strict background', True) is True:
-				validation = 'n'
-				self.make_question_incorrect(student_entry, "White background was used")
-
-		if validation is None:
-			# Obtain the user's input for the initial validation
-			extra_desc = student_entry['extra description']
-			if len(extra_desc) > 3:
-				console.print(f"{extra_desc}", style=brown_color)
-			validation = student_id_protein.get_input_validation("IMAGE is correct", 'ynabs')
-		else:
-			time.sleep(1)
-
-		if validation == 's':
-			self.save_and_exit()
-
-		# Quickly process the initial validation and determine whether further processing is needed
-		quick_status = self.quick_process_initial_image_validation(student_entry, validation)
-
-		# Exit the function early if quick_status is True
-		if quick_status is True:
-			student_entry['Image Assessment Complete'] = True
-			return
-
-		# Check whether almost_mode should be activated based on the validation input
-		almost_mode = (validation == 'a')
-
-		# Process each image question and update the student_entry dictionary
-		self.process_image_question_list(student_entry, almost_mode)
-		student_entry['Image Assessment Complete'] = True
-		return

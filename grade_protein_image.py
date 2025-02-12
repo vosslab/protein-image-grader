@@ -15,11 +15,13 @@ from rich.console import Console
 from rich.style import Style
 from rich.table import Table
 
-from tool_scripts import process_images
-from tool_scripts import file_io_protein
-from tool_scripts import timestamp_tools
-from tool_scripts import student_id_protein
 from tool_scripts import duplicate_processing
+from tool_scripts import file_io_protein
+from tool_scripts import grade_images_class
+from tool_scripts import read_save_images
+from tool_scripts import student_id_protein
+from tool_scripts import timestamp_tools
+
 
 
 console = Console()
@@ -380,7 +382,8 @@ def parse_and_prepare() -> dict:
 	if not os.path.isdir(folder):
 		os.mkdir(folder)
 
-	image_folder = f"DOWNNLOAD_{image_number:02d}"
+	current_year = time.localtime().tm_year
+	image_folder = f"DOWNLOAD_{image_number:02d}_year_{current_year:04d}"
 	# Ensure the folder exists
 	if not os.path.isdir(image_folder):
 		os.mkdir(image_folder)
@@ -584,7 +587,7 @@ def process_data(student_tree: list, params: dict, read_only_config_dict: dict) 
 	global console
 	console.print("\nPre-Processing Student Images", style=data_color)
 	console.print("\nDownloading and Reading Student Images", style=data_color)
-	process_images.read_and_save_student_images(student_tree, params)
+	read_save_images.read_and_save_student_images(student_tree, params)
 	# Save backup of the student_tree
 	download_save_yaml = os.path.join(params["folder"], "downloaded_images.yml")
 	file_io_protein.backup_tree_to_yaml(download_save_yaml, student_tree)
@@ -623,7 +626,7 @@ def process_data(student_tree: list, params: dict, read_only_config_dict: dict) 
 
 	# Loop through each student entry and process image questions
 	console.print("\nProcess Image Questions", style='green')
-	proc_img = process_images.process_image_questions_class(student_tree, read_only_config_dict)
+	proc_img = grade_images_class.process_image_questions_class(student_tree, read_only_config_dict)
 	proc_img.process_all_student_images()
 
 	# Save backup of the student_tree

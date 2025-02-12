@@ -1,141 +1,16 @@
-import os
 import sys
-import glob
 import time
-import commonlib
 from rich.console import Console
 from rich.style import Style
 
-from PIL import Image
-
 from tool_scripts import file_io_protein
-from tool_scripts import test_google_image
 from tool_scripts import student_id_protein
 
 console = Console()
 warning_color = Style(color="rgb(255, 187, 51)")  # RGB for bright orange
 question_color = Style(color="rgb(100, 149, 237)" )  # RGB for cornflower blue
 data_color = Style(color="rgb(187, 51, 255)")  # RGB for purple
-
-#============================================
-def download_and_process_image(student_entry: dict, params: dict) -> dict:
-	"""Download and process an image, storing metadata in a dictionary."""
-	image_url = student_entry.get('image url')
-	if image_url is None:
-		console.print("  \aError: Image URL not found", style="bright_red")
-		sys.exit(1)
-
-	output_filename_prefix = (
-		f"{student_entry['Student ID']}-"
-		f"{student_entry['First Name'].replace(' ', '_')}_"
-		f"{student_entry['Last Name'].replace(' ', '_')}-"
-	)
-	output_filename_prefix = os.path.join(params['image_folder'], output_filename_prefix)
-	file_search = glob.glob(output_filename_prefix+"*")
-	if len(file_search) == 0:
-		file_id = test_google_image.get_file_id_from_google_drive_url(image_url)
-		image_data, filename = test_google_image.download_image(file_id)
-	elif len(file_search) > 1:
-		raise ValueError(f"Too many matches for file {output_filename_prefix}")
-	else:
-		filename = file_search[0]
-		student_entry['Output Filename'] = filename
-		original_name = filename[len(output_filename_prefix):]
-		student_entry['Original Filename'] = original_name
-		image_data = open(filename, 'rb')
-	named_corner_pixels_dict = test_google_image.inspect_image_data(image_data)
-	phash, md5hash = test_google_image.get_hash_data(image_data)
-
-	image_data.seek(0)  # Reset stream position
-	pil_image = Image.open(image_data)
-
-	image_format = pil_image.format
-	image_mode = pil_image.mode
-
-	if image_format is None:
-		console.print(image_url)
-		console.print(test_google_image.normalize_google_drive_url(image_url))
-		console.print("  \aError: with this student's image, format not found.", style="bright_red")
-		console.print("  \aLikely Google Drive permissions error", style="bright_red")
-		raise TypeError
-
-	image_dict = {
-		'pil_image': pil_image,
-		'filename': filename,
-		'image_format': image_format,
-		'image_mode': image_mode,
-		'phash': phash,
-		'md5hash': md5hash,
-		'named_corner_pixels_dict': named_corner_pixels_dict
-	}
-
-	return image_dict
-
-#============================================
-def generate_output_filename(student_entry: dict, filename: str, params: dict) -> str:
-	"""Generate a sanitized output filename for the student's image."""
-	clib = commonlib.CommonLib()
-	filename = filename.lower()
-	basename = os.path.splitext(filename.lower())[0]
-	basename = clib.cleanName(basename)
-	extension = os.path.splitext(filename)[-1]
-	output_filename = (
-		f"{student_entry['Student ID']}-"
-		f"{student_entry['First Name'].replace(' ', '_')}_"
-		f"{student_entry['Last Name'].replace(' ', '_')}-"
-		f"{basename}{extension}"
-		)
-	goodchars = set(
-			'-._'
-			+ '0123456789'
-			+ 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-			+ 'abcdefghijklmnopqrstuvwxyz')
-	output_filename = ''.join(c if c in goodchars else '_' for c in output_filename)
-	output_filename = os.path.join(params['image_folder'], output_filename)
-	return output_filename
-
-#============================================
-def save_image(image_dict: dict, output_filename: str):
-	"""Save the processed image to a file."""
-	print(f"Saved image to {output_filename}")
-	image_dict['pil_image'].save(output_filename)
-	image_dict['pil_image'].close()
-
-#============================================
-def read_and_save_student_images(student_tree: list, params: dict) -> None:
-	"""Process student images, checking for duplicates and updating student entries."""
-	global console
-	for student_entry in student_tree:
-		if student_entry.get("Image Format") is not None:
-			continue
-
-		student_id_protein.print_student_info(student_entry)
-		image_dict = download_and_process_image(student_entry, params)
-
-		console.print(f"Processing image: {image_dict['filename']}")
-		if image_dict['image_format'] != 'PNG':
-			console.print(f"  WARNING: image is not type PNG, it is: {image_dict['image_format']}", style=warning_color)
-		if image_dict['image_mode'] != 'RGB':
-			console.print(f"  WARNING: image is not mode RGB, it is: {image_dict['image_mode']}", style=warning_color)
-
-		output_filename = generate_output_filename(student_entry, image_dict['filename'], params)
-		student_entry.update({
-			'128-bit MD5 Hash': image_dict['md5hash'],
-			'Perceptual Hash': image_dict['phash'],
-			'Original Filename': image_dict['filename'],
-			'Image Format': image_dict['image_format'],
-			'Output Filename': output_filename,
-			'Consensus Background Color': image_dict['named_corner_pixels_dict']['consensus']
-		})
-
-		save_image(image_dict, output_filename)
-
-	console.print("=============================")
-	console.print("\nChecking Student Images for Matches", style=data_color)
-
-	console.print('DONE\n\n', style="bright_green")
-	return
-
+brown_color = Style(color="rgb(153, 102, 51)")  # RGB for purple
 
 #============================
 class process_image_questions_class():
