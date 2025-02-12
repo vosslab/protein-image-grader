@@ -12,6 +12,9 @@ import urllib.parse
 
 # PIP modules
 import PIL.Image
+from PIL import Image
+from PIL import ImageChops
+
 #pip3 install google-api-python-client
 import googleapiclient.http
 import googleapiclient.discovery
@@ -47,32 +50,88 @@ credentials = Credentials.from_service_account_file(api_key_file, scopes=['https
 service = googleapiclient.discovery.build('drive', 'v3', credentials=credentials)
 
 
-def multi_trim(image):
-	"""
-	Iteratively trims borders around an image until its dimensions no longer change,
-	similar to ImageMagick's trim function applied multiple times.
+#============================================
 
-	Parameters:
-	- image: A PIL Image object to be trimmed.
+def get_background_color(image: Image.Image) -> tuple:
+	"""
+	Determine the background color by sampling 16 pixels near the four corners.
+
+	Args:
+		image (Image.Image): A PIL Image object.
 
 	Returns:
-	- A PIL Image object with all removable borders trimmed.
+		tuple: The most common background color from the sampled pixels.
 	"""
+	# Get image dimensions
+	width, height = image.size
+
+	# Define 16 sampled pixels (2×2 grid from each corner)
+	sample_pixels = [
+		image.getpixel((0, 0)), image.getpixel((1, 0)),
+		image.getpixel((0, 1)), image.getpixel((1, 1)),
+
+		image.getpixel((width - 1, 0)), image.getpixel((width - 2, 0)),
+		image.getpixel((width - 1, 1)), image.getpixel((width - 2, 1)),
+
+		image.getpixel((0, height - 1)), image.getpixel((1, height - 1)),
+		image.getpixel((0, height - 2)), image.getpixel((1, height - 2)),
+
+		image.getpixel((width - 1, height - 1)), image.getpixel((width - 2, height - 1)),
+		image.getpixel((width - 1, height - 2)), image.getpixel((width - 2, height - 2))
+	]
+
+	# Find the most frequent color
+	most_common_color = max(set(sample_pixels), key=sample_pixels.count)
+
+	return most_common_color
+
+#============================================
+
+def trim(image: Image.Image, tolerance: int = 0) -> Image.Image:
+	"""
+	Trims borders around an image based on the background color.
+
+	Args:
+		image (Image.Image): A PIL Image object to be trimmed.
+		tolerance (int): How much variation in color is allowed (default 0).
+
+	Returns:
+		Image.Image: A trimmed PIL Image object.
+	"""
+	bg_color = get_background_color(image)  # Get the most common corner color
+	bg = Image.new(image.mode, image.size, bg_color)  # Create a solid background
+	diff = ImageChops.difference(image, bg)  # Find differences
+	diff = ImageChops.add(diff, diff, 2.0, -tolerance)  # Enhance differences
+	bbox = diff.getbbox()
+
+	if bbox:
+		return image.crop(bbox)
+
+	return image  # No trimming possible
+
+#============================================
+
+def multi_trim(image: Image.Image, tolerance: int = 0) -> Image.Image:
+	"""
+	Iteratively trims an image until its dimensions no longer change.
+
+	Args:
+		image (Image.Image): A PIL Image object to be trimmed.
+		tolerance (int): How much variation in color is allowed when trimming.
+
+	Returns:
+		Image.Image: A fully trimmed PIL Image object.
+	"""
+	count = 0
 	while True:
 		original_size = image.size
-		bbox = image.getbbox()
+		image = trim(image, tolerance)
 
-		if not bbox:
-			# No further trimming is possible if no bounding box is found.
-			break
-
-		trimmed_image = image.crop(bbox)
-
-		if trimmed_image.size == original_size:
-			# If the image size hasn't changed, all removable borders have been trimmed.
-			break
-
-		image = trimmed_image  # Prepare for the next iteration, if needed.
+		if image.size == original_size:
+			count += 1
+			if count > 1:
+				# Stop when no further trimming occurs
+				break
 
 	return image
 
