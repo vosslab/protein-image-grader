@@ -49,23 +49,6 @@ def parse_args():
 
 #============================================
 
-def rotate_if_tall(image):
-	"""
-	Rotates the image 90 degrees clockwise if its height is greater than its width.
-
-	Args:
-		image (Image.Image): A PIL Image object.
-
-	Returns:
-		Image.Image: The rotated image if needed, otherwise the original image.
-	"""
-	if image.height > image.width:
-		return image.rotate(-90, expand=True)  # Rotate 90 degrees clockwise
-
-	return image  # No rotation needed
-
-#============================================
-
 def get_image_html_tag(image_url: str, ruid: int, trim: bool=False, rotate: bool= False) -> str:
 	"""
 	Download image from Google Drive and return an HTML tag linking to the local file.
@@ -111,7 +94,7 @@ def get_image_html_tag(image_url: str, ruid: int, trim: bool=False, rotate: bool
 		if trim is True:
 			trimmed_image = test_google_image.multi_trim(pil_image, 1)
 			if rotate is True:
-				trimmed_image = rotate_if_tall(trimmed_image)
+				trimmed_image = test_google_image.rotate_if_tall(trimmed_image)
 			trimmed_image.save(trim_path)
 			print(f"saved {trim_file}")
 		try:

@@ -17,12 +17,10 @@ from rich.table import Table
 
 from tool_scripts import duplicate_processing
 from tool_scripts import file_io_protein
-from tool_scripts import grade_images_class
+from tool_scripts import interactive_image_criteria_class
 from tool_scripts import read_save_images
 from tool_scripts import student_id_protein
 from tool_scripts import timestamp_tools
-
-
 
 console = Console()
 warning_color = Style(color="rgb(255, 187, 51)" )  # RGB for bright orange
@@ -517,6 +515,7 @@ def load_student_data(params: dict, read_only_config: dict) -> tuple:
 		tuple: (student_tree, student_ids_tree)
 	"""
 	# Load from YAML backup if provided
+	t0 = time.time()
 	if params["args"].yaml_backup_file:
 		with open(params["args"].yaml_backup_file, 'r') as f:
 			student_tree = yaml.safe_load(f)
@@ -532,7 +531,8 @@ def load_student_data(params: dict, read_only_config: dict) -> tuple:
 
 	#back up matched students
 	match_yaml = os.path.join(params["folder"], "matched_students.yml")
-	file_io_protein.backup_tree_to_yaml(match_yaml, student_tree)
+	if time.time() - t0 > 4:
+		file_io_protein.backup_tree_to_yaml(match_yaml, student_tree)
 
 	return student_tree, student_ids_tree
 
@@ -585,18 +585,21 @@ def process_data(student_tree: list, params: dict, read_only_config_dict: dict) 
 		Updates the student_tree list in-place.
 	"""
 	global console
+	t0 = time.time()
 	console.print("\nPre-Processing Student Images", style=data_color)
 	console.print("\nDownloading and Reading Student Images", style=data_color)
 	read_save_images.read_and_save_student_images(student_tree, params)
 	# Save backup of the student_tree
 	download_save_yaml = os.path.join(params["folder"], "downloaded_images.yml")
-	file_io_protein.backup_tree_to_yaml(download_save_yaml, student_tree)
+	if time.time() - t0 > 4:
+		file_io_protein.backup_tree_to_yaml(download_save_yaml, student_tree)
 
 	console.print("\nChecking Student Images for Duplicates", style=data_color)
 	duplicate_processing.check_duplicate_images(student_tree, params)
 	# Save backup of the student_tree
 	duplicate_check_save_yaml = os.path.join(params["folder"], "duplicate_check_save.yml")
-	file_io_protein.backup_tree_to_yaml(duplicate_check_save_yaml, student_tree)
+	if time.time() - t0 > 4:
+		file_io_protein.backup_tree_to_yaml(duplicate_check_save_yaml, student_tree)
 
 	# Loop through each student entry and process timestamp due dates
 	console.print("\nPre-Processing Turn In Date", style=data_color)
@@ -605,7 +608,8 @@ def process_data(student_tree: list, params: dict, read_only_config_dict: dict) 
 
 	# Save backup of the student_tree
 	preprocess_save_yaml = os.path.join(params["folder"], "preprocess_save.yml")
-	file_io_protein.backup_tree_to_yaml(preprocess_save_yaml, student_tree)
+	if time.time() - t0 > 4:
+		file_io_protein.backup_tree_to_yaml(preprocess_save_yaml, student_tree)
 
 	# Loop through questions in read_only_config_dict and process each CSV question
 	console.print("\nProcess CSV Questions", style='green')
@@ -622,16 +626,18 @@ def process_data(student_tree: list, params: dict, read_only_config_dict: dict) 
 
 	# Save backup of the student_tree
 	postquestions_save_yaml = os.path.join(params["folder"], "post-questions_save.yml")
-	file_io_protein.backup_tree_to_yaml(postquestions_save_yaml, student_tree)
+	if time.time() - t0 > 4:
+		file_io_protein.backup_tree_to_yaml(postquestions_save_yaml, student_tree)
 
 	# Loop through each student entry and process image questions
 	console.print("\nProcess Image Questions", style='green')
-	proc_img = grade_images_class.process_image_questions_class(student_tree, read_only_config_dict)
+	proc_img = interactive_image_criteria_class.process_image_questions_class(student_tree, read_only_config_dict)
 	proc_img.process_all_student_images()
 
 	# Save backup of the student_tree
 	postimages_save_yaml = os.path.join(params["folder"], "post-images_save.yml")
-	file_io_protein.backup_tree_to_yaml(postimages_save_yaml, student_tree)
+	if time.time() - t0 > 4:
+		file_io_protein.backup_tree_to_yaml(postimages_save_yaml, student_tree)
 
 	# Calculate the final score for each student entry
 	console.print("\nCalculating Final Scores")

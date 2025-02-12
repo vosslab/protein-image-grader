@@ -63,7 +63,7 @@ def create_image_dict(image_data, original_filename, output_filename):
 		console.print("  Error: Image metadata not found, possibly corrupt file.")
 		raise ValueError
 
-	phash, md5hash = test_google_image.get_hash_data(image_data)
+	md5hash, phash = test_google_image.get_hash_data(image_data)
 	image_data.seek(0)
 	pil_image = Image.open(image_data)
 

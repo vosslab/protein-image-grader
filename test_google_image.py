@@ -86,6 +86,24 @@ def get_background_color(image: Image.Image) -> tuple:
 
 #============================================
 
+def rotate_if_tall(image: Image.Image) -> Image.Image:
+	"""
+	Rotates the image 90 degrees clockwise if its height is greater than its width.
+
+	Args:
+		image (Image.Image): A PIL Image object.
+
+	Returns:
+		Image.Image: The rotated image if needed, otherwise the original image.
+	"""
+	if image.height > image.width:
+		# Use transpose for lossless rotation
+		return image.transpose(Image.Transpose.ROTATE_90)  # 90 degrees clockwise
+
+	return image  # No rotation needed
+
+#============================================
+
 def trim(image: Image.Image, tolerance: int = 0) -> Image.Image:
 	"""
 	Trims borders around an image based on the background color.
@@ -110,7 +128,7 @@ def trim(image: Image.Image, tolerance: int = 0) -> Image.Image:
 
 #============================================
 
-def multi_trim(image: Image.Image, tolerance: int = 0) -> Image.Image:
+def multi_trim(image: Image.Image, tolerance: int = 3) -> Image.Image:
 	"""
 	Iteratively trims an image until its dimensions no longer change.
 
@@ -125,7 +143,7 @@ def multi_trim(image: Image.Image, tolerance: int = 0) -> Image.Image:
 	while True:
 		original_size = image.size
 		image = trim(image, tolerance)
-
+		image = rotate_if_tall(image)
 		if image.size == original_size:
 			count += 1
 			if count > 1:
@@ -180,6 +198,7 @@ def calculate_phash(image_data, hash_size: int = 16) -> str:
 	# Ensure the image is in RGB mode
 	if pil_image.mode != 'RGB':
 		pil_image = pil_image.convert('RGB')
+	pil_image = multi_trim(pil_image)
 	pil_image = multi_trim(pil_image)
 	return str(imagehash.phash(pil_image, hash_size=hash_size))
 
@@ -452,7 +471,7 @@ def download_image_and_inspect(image_url: str) -> tuple:
 def get_hash_data(image_data):
 	phash = calculate_phash(image_data)
 	md5hash = calculate_md5(image_data)
-	return phash, md5hash
+	return md5hash, phash
 
 #============================================
 

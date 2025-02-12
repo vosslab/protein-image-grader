@@ -1,11 +1,9 @@
 import os
-import sys
 import yaml
 from rich.console import Console
 from rich.style import Style
 from collections import defaultdict
 
-from tool_scripts import test_google_image
 from tool_scripts import student_id_protein
 
 console = Console()
@@ -74,108 +72,123 @@ def fill_local_image_hashes(student_tree: list) -> dict:
 	local_image_hashes = {}
 	local_image_hashes['md5'] = defaultdict(list)
 	local_image_hashes['phash'] = defaultdict(list)
+	total_hashes = 0
 	for student_entry in student_tree:
 		md5hash = student_entry['128-bit MD5 Hash']
 		phash = student_entry['Perceptual Hash']
-		local_image_hashes['md5'][md5hash].append(student_entry)
-		local_image_hashes['phash'][phash].append(student_entry)
+		output_filename = student_entry['Output Filename']
+		local_image_hashes['md5'][md5hash].append(output_filename)
+		local_image_hashes['phash'][phash].append(output_filename)
+		total_hashes += 1
+	print(f"Sorted {total_hashes} image hashes from {len(student_tree)} students")
 	return local_image_hashes
 
 #============================================
 def find_file_path(filename):
 	pass
 
+from collections import defaultdict
 
-#==========================================
+def dfs(node, graph, visited, component):
+	"""Recursive DFS to collect all connected nodes."""
+	visited.add(node)
+	component.add(node)
+	for neighbor in graph[node]:
+		if neighbor not in visited:
+			dfs(neighbor, graph, visited, component)
 
-def null():
-	if True:
-		if image_hashes['md5'].get(md5hash) is None:
-			image_hashes['md5'][md5hash] = output_filename
+def get_non_overlapping_group_sets(list_of_sets):
+	"""Builds a graph and finds connected components to get non-overlapping groups."""
+	# Step 1: Build the adjacency list (graph)
+	graph = defaultdict(set)
+	for group_set in list_of_sets:
+		for file1 in group_set:
+			for file2 in group_set:
+				if file1 != file2:
+					graph[file1].add(file2)
+					graph[file2].add(file1)
 
-		if local_image_hashes.get(md5hash) is None:
-			local_image_hashes[md5hash] = [output_filename, ]
-			local_image_perc_hashes[phash] = output_filename
-		else:
-			local_image_hashes[md5hash].append(output_filename)
+	# Step 2: Find connected components using DFS
+	visited = set()
+	non_overlapping_group_sets = []
+
+	for node in graph:
+		if node not in visited:
+			component = set()
+			dfs(node, graph, visited, component)
+			non_overlapping_group_sets.append(component)
+
+	return non_overlapping_group_sets
 
 
+#============================================
+def find_similar_duplicates(student_tree: list, image_hashes: dict, local_image_hashes: dict):
+	comparisons = 0
 
-		if lower_filename.startswith('screenshot') or lower_filename.startswith('screen_shot'):
-			console.print("  \aWARNING: image filename starts with screenshot", style=warning_color)
-			student_entry['Warnings'].append("likely screenshot")
-		if named_corner_pixels_dict['consensus'] != "White":
-			console.print("  WARNING: image does not have White Background", style=warning_color)
-			student_entry['Warnings'].append("non-white background")
-			if named_corner_pixels_dict['consensus'] is False:
-				console.print(named_corner_pixels_dict)
-			else:
-				console.print(f"  Consensus Color: {named_corner_pixels_dict['consensus']}")
-	console.print("=============================")
-	console.print("\nChecking Student Images for Matches", style=data_color)
-	image_exact_dups = []
-	image_similar_dups = []
+	list_of_sets = []
+
 	for student_entry in student_tree:
-		student_id_protein.print_student_info(student_entry)
-		student_entry['Exact Match'] = False
-		md5hash = student_entry['128-bit MD5 Hash']
+		if student_entry.get('Exact Match') is True:
+			# no need to do it more than once
+			continue
+		if student_entry.get('Similar Match') is True:
+			# no need to do it more than once
+			continue
+		student_entry['Similar Match'] = False
 		phash = student_entry['Perceptual Hash']
 		output_filename = student_entry['Output Filename']
-		if len(local_image_hashes.get(md5hash)) > 1:
-			oldfilenames = local_image_hashes.get(md5hash)
-			report_txt = f'total files matching: {len(oldfilenames)}'
-			student_id_protein.print_student_info(student_entry)
-			console.print(f"  md5 hash: {md5hash}")
-			console.print(f"  \aWARNING: image has been submitted this semester: {report_txt}", style=warning_color)
-			student_entry['Warnings'].append(f"exact same image has been submitted this semester: {report_txt}")
-			#image_exact_dups.append((output_filename, report_txt))
-			student_entry['Exact Match'] = report_txt
-		elif image_hashes['md5'].get(md5hash) != output_filename:
-			oldfilename = image_hashes['md5'].get(md5hash)
-			student_id_protein.print_student_info(student_entry)
-			console.print(f"  md5 hash: {md5hash}")
-			console.print(f"  \aWARNING: exact same image has been submitted in previous semester: {oldfilename}", style=warning_color)
-			student_entry['Warnings'].append("exact same image has been submitted in previous semester")
-			image_exact_dups.append((output_filename, oldfilename))
-			student_entry['Exact Match'] = oldfilename
-		else:
-			for old_phash, oldfilename in image_hashes['phash'].items():
-				if oldfilename == output_filename:
-					continue
-				ham_dist = hamming_distance(phash, old_phash)
-				if ham_dist < 20:
-					student_id_protein.print_student_info(student_entry)
-					console.print(f"PHASH COMP: {phash[:8]}  and {old_phash[:8]} distance: {ham_dist}, file: {oldfilename}", style=warning_color)
-					image_similar_dups.append((output_filename, oldfilename))
-			for local_phash, local_file in local_image_perc_hashes.items():
-				if local_file == output_filename:
-					continue
-				ham_dist = hamming_distance(phash, local_phash)
-				if ham_dist < 20:
-					student_id_protein.print_student_info(student_entry)
-					console.print(f"PHASH COMP: {phash[:8]}  and {local_phash[:8]} distance: {ham_dist}, file: {local_file}", style=warning_color)
-					image_similar_dups.append((output_filename, local_file))
-				if ham_dist < 1:
-					student_entry['Exact Match'] = local_file
+		dup_image_filenames = set()
+		dup_image_filenames.add(output_filename)
+		cutoff = 40
+		for old_phash, oldfilename in image_hashes['phash'].items():
+			continue
+			ham_dist = hamming_distance(phash, old_phash)
+			comparisons += 1
+			if ham_dist < cutoff:
+				student_entry['Similar Match'] = True
+				console.print(f"PHASH CLASH: {phash[:8]} and {old_phash[:8]} distance: {ham_dist}, file: {oldfilename}", style=warning_color)
+				dup_image_filenames.add(oldfilename)
 
-	console.print("=============================")
-	for md5hash in local_image_hashes.keys():
-		if len(local_image_hashes[md5hash]) > 1:
-			mytxt = 'open '
-			for imgfile in local_image_hashes[md5hash]:
-				mytxt += f'{imgfile} '
-			console.print(mytxt)
-	for t in image_exact_dups:
-		console.print(f'exact md5 dup {t}')
-	console.print("")
-	for t in image_similar_dups:
-		console.print(f'sim phash dup {t}')
-		console.print(f'open {t[0]} $(find . -name {t[1]})')
+		for local_phash, output_filename_list in local_image_hashes['phash'].items():
+			if local_phash == phash:
+				continue
+			ham_dist = hamming_distance(phash, local_phash)
+			comparisons += 1
+			if ham_dist < cutoff:
+				student_entry['Similar Match'] = True
+				for output_filename in output_filename_list:
+					console.print(f"PHASH CLASH: {phash[:8]} and {local_phash[:8]} distance: {ham_dist}", style=warning_color)
+					dup_image_filenames.add(output_filename)
 
-		#sys.exit(1)
-	console.print('DONE\n\n', style="bright_green")
+		if len(dup_image_filenames) == 1:
+			student_entry['Similar Match'] = False
+			continue
+		list_of_sets.append(dup_image_filenames)
+
+		if student_entry['Similar Match'] is True:
+			student_entry['Warnings'].append("You have submitted a very similar images to other students, please make your image more unique in the future or could lost points.")
+
+	non_overlapping_group_sets = get_non_overlapping_group_sets(list_of_sets)
+
+	for group_num, group_set in enumerate(non_overlapping_group_sets, start=1):
+		print(f"GROUP NUMBER {group_num}")
+		system_cmd = "open " + ' '.join(group_set)
+		print(system_cmd)
+		os.system(system_cmd)
+		validation = student_id_protein.get_input_validation("wait", 'ync', question_color)
+		if validation == 'c':
+			pass
+
+	print(f"Made {comparisons:,d} comparisons looking for similar images")
+	raise ValueError
 	return
 
+#============================================
+def find_student_entry_by_filename(output_filename: str, student_tree: list):
+		for student_entry in student_tree:
+			if student_entry['Output Filename'] != output_filename:
+				continue
+			return student_entry
 
 #============================================
 def find_exact_local_duplicates(student_tree: list, local_image_hashes: dict):
@@ -185,36 +198,40 @@ def find_exact_local_duplicates(student_tree: list, local_image_hashes: dict):
 			continue
 		md5hash = student_entry['128-bit MD5 Hash']
 		phash = student_entry['Perceptual Hash']
-		if len(local_image_hashes['md5'][md5hash]) == 1 and len(local_image_hashes['phash'][phash]) == 1:
+		if (len(local_image_hashes['md5'][md5hash]) == 1
+			and len(local_image_hashes['phash'][phash]) == 1):
 			student_entry['Exact Match'] = False
 			continue
 		student_id_protein.print_student_info(student_entry)
 		student_entry['Exact Match'] = True
 		#duplicate this semester !!
+		dup_image_filenames = set()
+		for output_filename in local_image_hashes['md5'][md5hash]:
+			dup_image_filenames.add(output_filename)
+		# just case there are other matches
+		for output_filename in local_image_hashes['phash'][phash]:
+			dup_image_filenames.add(output_filename)
+
+		student_names = set()
+		for output_filename in dup_image_filenames:
+			dup_student = find_student_entry_by_filename(output_filename, student_tree)
+			dup_student['Exact Match'] = True
+			# Format the student's name with first name and initial of the last name
+			student_name = f"{dup_student['First Name']} {dup_student['Last Name'][0]}."
+			student_names.add(student_name)
+
 		report_txt = "You are one of a group of students that all submitted the same image. "
 		report_txt += "You are welcome to work together, but you must submit your own unique image. "
-		student_names = set()
-		image_filenames = set()
-		for dup_student in local_image_hashes['md5'][md5hash]:
-			dup_student['Exact Match'] = True
-			# Format the student's name with first name and initial of the last name
-			student_name = f"{dup_student['First Name']} {dup_student['Last Name'][0]}."
-			student_names.add(student_name)
-			image_filenames.add(dup_student['Output Filename'])
-		# just case there are other matches
-		for dup_student in local_image_hashes['phash'][phash]:
-			dup_student['Exact Match'] = True
-			# Format the student's name with first name and initial of the last name
-			student_name = f"{dup_student['First Name']} {dup_student['Last Name'][0]}."
-			student_names.add(student_name)
-			image_filenames.add(dup_student['Output Filename'])
 		report_txt += f"These {len(student_names)} students: "
 		report_txt += ', '.join(student_names)
 		report_txt += " will all receive a grade deduction."
 		print(report_txt)
-		student_entry['Warnings'].append(f"exact same image has been submitted this semester: {report_txt}")
-		student_entry['Exact Match'] = report_txt
-		system_cmd = "open " + " ".join(image_filenames)
+
+		system_cmd = "open " + " ".join(dup_image_filenames)
+		print(system_cmd)
+		for output_filename in dup_image_filenames:
+			dup_student = find_student_entry_by_filename(output_filename, student_tree)
+			dup_student['Warnings'].append(f"exact same image has been submitted this semester: {report_txt}")
 		#os.system(system_cmd)
 		#wait for input
 		#validation = student_id_protein.get_input_validation("wait", 'yn', question_color)
@@ -227,7 +244,8 @@ def find_exact_global_duplicates(student_tree: list, image_hashes: dict):
 			continue
 		md5hash = student_entry['128-bit MD5 Hash']
 		phash = student_entry['Perceptual Hash']
-		if not image_hashes['md5'].get(md5hash) and not image_hashes['phash'].get(phash):
+		if (not image_hashes['md5'].get(md5hash)
+			and not image_hashes['phash'].get(phash)):
 			student_entry['Exact Match'] = False
 			continue
 		student_entry['Exact Match'] = True
@@ -238,23 +256,25 @@ def find_exact_global_duplicates(student_tree: list, image_hashes: dict):
 		print(report_txt)
 		student_entry['Warnings'].append(f"exact same image has been submitted previous semester: {report_txt}")
 		student_entry['Exact Match'] = report_txt
-		system_cmd = "open " + " ".join(image_filenames)
-		os.system(system_cmd)
+		#system_cmd = "open " + " ".join(image_filenames)
+		#os.system(system_cmd)
 		#wait for input
-		validation = student_id_protein.get_input_validation("wait", 'yn', question_color)
+		#validation = student_id_protein.get_input_validation("wait", 'yn', question_color)
 
 #============================================
 def check_duplicate_images(student_tree: list, params: dict):
 	"""Check for duplicate images and log warnings."""
 
 	local_image_hashes = fill_local_image_hashes(student_tree)
+	console.print("\nFind EXACT local duplicates", style=data_color)
 	find_exact_local_duplicates(student_tree, local_image_hashes)
 
 	image_hashes = load_image_hashes()
+	console.print("\nFind EXACT global duplicates", style=data_color)
 	find_exact_global_duplicates(student_tree, image_hashes)
 
-	raise NotImplementedError
-
+	console.print("\nFind SIMILAR duplicates", style=data_color)
+	find_similar_duplicates(student_tree, image_hashes, local_image_hashes)
 
 	console.print("=============================")
 	console.print('DONE\n\n', style="bright_green")

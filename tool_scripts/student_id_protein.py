@@ -19,6 +19,7 @@ validation_color = Style(color="rgb(153, 230, 76)" )  # RGB for lime-ish green
 validation_types = {
 	'a': 'almost',
 	'b': 'bonus',
+	'c': 'custom',
 	'f': 'finished',
 	'n': 'no',
 	'p': 'previous',
@@ -67,48 +68,6 @@ def get_input_validation(message: str, valid_letters: str, style: Style = valida
 
 		# Use Rich to print an error message if the entry is invalid
 		console.print("ERROR ~ try again ~\n", style='red')
-
-#==============
-def get_input_validation2(message: str, valid_letters: str) -> str:
-	"""
-	Get user input for image validation and ensure it's valid.
-
-	Parameters
-	----------
-	message : str
-		The custom message that will be displayed to the user when asking for input.
-	valid_letters : str
-		The string containing all valid input letters.
-
-	Returns
-	-------
-	str
-		The validated user input.
-	"""
-	# Convert the string of valid letters to a tuple.
-	valid_tuple = tuple(valid_letters)
-	statement = message.strip() + '\n - '
-
-	for letter in valid_letters:
-		word = validation_types[letter]
-		word = word.replace(letter, '(' + letter + ')')
-		statement += word + '/'
-	statement = statement[:-1] + ': '
-
-	while True:
-		# Use Rich to print the statement with style
-		console.print(Text(statement, style=validation_color))
-
-		# Get the user's input. Note: input() is used without styling as it doesn't support Rich styles directly.
-		validation = input()
-
-		# Check if the entered input is in the list of valid inputs.
-		if validation.lower() in valid_tuple:
-			return validation.lower()
-
-		# Use Rich to print an error message if the entry is invalid.
-		console.print("ERROR ~ try again ~\n", style='red')
-
 
 #==============
 def print_student_info(student_entry: dict) -> None:
