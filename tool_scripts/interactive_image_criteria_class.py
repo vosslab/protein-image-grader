@@ -258,6 +258,12 @@ class process_image_questions_class():
 				validation = 'n'
 				self.make_question_incorrect(student_entry, "White background was used")
 
+		lower_filename = student_entry['Original Filename'].lower()
+		if 'screenshot' in lower_filename or 'screen_shot' in lower_filename:
+			console.print("  \aWARNING: image filename starts with screenshot", style=warning_color)
+			student_entry['Warnings'].append("likely screenshot")
+			self.make_question_incorrect(student_entry, "PNG image export was used, not a screenshot")
+
 		if validation is None:
 			# Obtain the user's input for the initial validation
 			extra_desc = student_entry['extra description']

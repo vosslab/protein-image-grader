@@ -60,7 +60,7 @@ def get_image_html_tag(image_url: str, ruid: int, trim: bool=False, rotate: bool
 	print(file_id)
 	# Attempt to download the image
 	try:
-		image_data, original_filename = test_google_image.download_image(file_id, test_google_image.service)
+		image_data, original_filename = test_google_image.download_image(file_id)
 	except googleapiclient.errors.HttpError as e:
 		# Print error message and wait before retrying
 		print(f"Error downloading image: {e}")
