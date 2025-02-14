@@ -45,9 +45,13 @@ NAMED_COLORS = {
 #api_key_file = "api_file.json"
 api_key_file = "service_key.json"
 
-# Initialize Google Drive API client
-credentials = Credentials.from_service_account_file(api_key_file, scopes=['https://www.googleapis.com/auth/drive.readonly'])
+scopes = ['https://www.googleapis.com/auth/drive.readonly']
+credentials = Credentials.from_service_account_file(api_key_file, scopes=scopes)
 service = googleapiclient.discovery.build('drive', 'v3', credentials=credentials)
+
+# Initialize Google Drive API client
+#credentials = Credentials.from_service_account_file(api_key_file, scopes=['https://www.googleapis.com/auth/drive.readonly'])
+#service = googleapiclient.discovery.build('drive', 'v3', credentials=credentials)
 
 #============================================
 
@@ -364,11 +368,16 @@ def send_http_request(url: str, session_data=None):
 def download_image(file_id):
 	global service
 	# Initialize the file request for downloading the image
+	#print(f"fileId={file_id}")
+	#print("request = service.files().get_media(fileId=file_id)")
 	request = service.files().get_media(fileId=file_id)
 
 	# Get the file metadata to retrieve the filename
-	file_metadata = service.files().get(fileId=file_id).execute()
+	#file_metadata = service.files().get(fileId=file_id).execute()
+	file_metadata = service.files().get(fileId=file_id, supportsAllDrives=True).execute()
+	#print("file_metadata = service.files().get(fileId=file_id).execute()")
 	filename = file_metadata['name'].lower()
+	#print(f"file_metadata['name'].lower() = {filename}")
 	mime_parts = file_metadata['mimeType'].split('/')
 	if mime_parts[0] != 'image':
 		print(file_metadata)
@@ -387,6 +396,7 @@ def download_image(file_id):
 	# Use an in-memory byte stream to hold the downloaded file
 	file_data = io.BytesIO()
 
+	print("downloader = googleapiclient.http.MediaIoBaseDownload(file_data, request)")
 	# Initialize downloader
 	downloader = googleapiclient.http.MediaIoBaseDownload(file_data, request)
 

@@ -22,7 +22,18 @@ register_heif_opener()
 
 #google_id = 2
 
-image_dir = 'PROFILE_IMAGES'
+fail_count = 0
+
+# Define the image storage directory
+current_year = time.localtime().tm_year
+current_month = time.localtime().tm_mon
+if 1 <= current_month <= 5:
+	semester = "1Spring"
+elif 6 <= current_month <= 8:
+	semester = "2Summer"
+else:
+	semester = "3Fall"
+image_dir = f"{current_year}_{semester}"
 
 #============================================
 
@@ -59,12 +70,17 @@ def get_image_html_tag(image_url: str, ruid: int, trim: bool=False, rotate: bool
 	file_id = test_google_image.get_file_id_from_google_drive_url(image_url)
 	print(file_id)
 	# Attempt to download the image
+	global fail_count
 	try:
 		image_data, original_filename = test_google_image.download_image(file_id)
 	except googleapiclient.errors.HttpError as e:
+		fail_count += 1
 		# Print error message and wait before retrying
 		print(f"Error downloading image: {e}")
 		time.sleep(random.random())  # Prevent server overload
+		print("check permissions of the folder for vosslab-12389@protein-images.iam.gserviceaccount.com")
+		if fail_count > 2:
+			raise ValueError
 		return ''
 	print(original_filename)
 	filename = original_filename.lower()
@@ -75,7 +91,6 @@ def get_image_html_tag(image_url: str, ruid: int, trim: bool=False, rotate: bool
 	# Ensure the file has a valid image extension
 	if not filename.endswith('.jpg') and not filename.endswith('.png'):
 		filename = os.path.splitext(filename)[0] + '.png'
-	# Define the image storage directory
 	global image_dir
 	# Create the directory if it does not exist
 	if not os.path.isdir(image_dir):
