@@ -226,6 +226,8 @@ class process_image_questions_class():
 
 		# Print student information using the provided function
 		student_id_protein.print_student_info(student_entry)
+		#print(student_entry.keys())
+		print(f".. Original Filename = {student_entry['Original Filename']}")
 
 		# Skip this student if it has already been graded
 		if student_entry.get('Image Assessment Complete') is True:
@@ -266,7 +268,7 @@ class process_image_questions_class():
 
 		if validation is None:
 			# Obtain the user's input for the initial validation
-			extra_desc = student_entry['extra description']
+			extra_desc = student_entry.get('extra description', '')
 			if len(extra_desc) > 3:
 				console.print(f"{extra_desc}", style=brown_color)
 			validation = student_id_protein.get_input_validation("IMAGE is correct", 'ynabs')

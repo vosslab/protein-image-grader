@@ -90,14 +90,14 @@ def get_image_html_tag(image_url: str, ruid: int, trim: bool=False, rotate: bool
 	filename = f"{ruid}-{basename}{extension}"
 	# Ensure the file has a valid image extension
 	if not filename.endswith('.jpg') and not filename.endswith('.png'):
-		filename = os.path.splitext(filename)[0] + '.png'
+		filename = os.path.splitext(filename)[0] + '.jpg'
 	global image_dir
 	# Create the directory if it does not exist
 	if not os.path.isdir(image_dir):
 		os.makedirs(image_dir)
 	#print(filename)
 	if trim is True:
-		trim_file = os.path.splitext(filename)[0] + '-trim.png'
+		trim_file = os.path.splitext(filename)[0] + '-trim.jpg'
 		trim_path = os.path.abspath(os.path.join(image_dir, trim_file))
 	# Create the absolute file path
 	filepath = os.path.abspath(os.path.join(image_dir, filename))

@@ -255,6 +255,8 @@ def mark_images_as_duplicates(dup_image_filenames_list, student_tree):
 
 	for output_filename in dup_image_filenames_list:
 		dup_student = find_student_entry_by_filename(output_filename, student_tree)
+		if not 'Warnings' in dup_student:
+			dup_student['Warnings'] = []
 		dup_student['Warnings'].append(f"exact same image has been submitted this semester: {report_txt}")
 
 

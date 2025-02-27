@@ -20,16 +20,16 @@ download_count = 0
 def get_image_data(student_entry: dict, params: dict):
 	"""Download or load an image from cache, ensuring consistency."""
 	global download_count
+	clib = commonlib.CommonLib()
 
 	image_url = student_entry.get('image url')
 	if image_url is None:
 		console.print("  \aError: Image URL not found", style="bright_red")
 		sys.exit(1)
-
 	output_filename_prefix = (
 		f"{student_entry['Student ID']}-"
-		f"{student_entry['First Name'].replace(' ', '_')}_"
-		f"{student_entry['Last Name'].replace(' ', '_')}-"
+		f"{student_entry['First Name'].lower().replace(' ', '_')}_"
+		f"{student_entry['Last Name'].lower().replace(' ', '_')}-"
 	)
 	output_filename_prefix = os.path.join(params['image_folder'], output_filename_prefix)
 
@@ -42,7 +42,13 @@ def get_image_data(student_entry: dict, params: dict):
 		file_id = test_google_image.get_file_id_from_google_drive_url(image_url)
 		image_data, original_filename = test_google_image.download_image(file_id)
 		download_count += 1
-		output_filename = os.path.join(params['image_folder'], original_filename)
+		print(f"original_filename = {original_filename}")
+		filename = original_filename.lower()
+		basename = os.path.splitext(filename)[0]
+		basename = clib.cleanName(basename)
+		extension = os.path.splitext(filename)[-1]
+		output_filename = f"{output_filename_prefix}{basename}{extension}"
+		print(f"output_filename = {output_filename}")
 
 	elif len(file_search) > 1:
 		raise ValueError(f"Too many matches for file {output_filename_prefix}")
