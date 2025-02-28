@@ -13,6 +13,8 @@ from collections import defaultdict
 from rich.console import Console
 from rich.style import Style
 from rich.text import Text
+import unicodedata
+import unidecode
 
 console = Console()
 validation_color = Style(color="rgb(153, 230, 76)")  # RGB for lime-ish green
@@ -48,10 +50,16 @@ emoji_limit = 20
 #==============================================================================
 #==============================================================================
 def normalize_name_text(name_text: str) -> str:
+	name_text = re.sub(r":", "", name_text)
 	name_text = name_text.strip()
 	name_text = name_text.lower()
-	name_text = re.sub(r"\s*iphone\s*", "", name_text)
+	name_text = unicodedata.normalize('NFKC', name_text)
+	name_text = unidecode.unidecode(name_text)
+	name_text = re.sub(r"\(.*\)", "", name_text).strip()
+	name_text = re.sub(r"\'s($|\s)", r"\1", name_text).strip()
+	name_text = re.sub(r"\s*(iphone|ipad)\s*", "", name_text)
 	name_text = re.sub(r"[^A-Za-z0-9\- ]", "", name_text)
+	name_text = name_text.strip()
 	return name_text
 
 # =======================
@@ -287,7 +295,7 @@ def find_closest_match(zoom_name: str, student_roster: dict) -> str:
 
 	# At this point, we have a best match but might need user confirmation
 	matched_name = best_match[0]
-	print(f"Closest match found:\nA: {matched_name}\nB: {normalized_key}")
+	print(f"Closest match found:\nmatch: {matched_name}\ninput: {normalized_key}")
 	validation = get_input_validation("    Is this a good match? (y/n)", "yn")
 
 	if validation == "n":
