@@ -110,6 +110,8 @@ def get_image_html_tag(image_url: str, ruid: int, trim: bool=False, rotate: bool
 			trimmed_image = test_google_image.multi_trim(pil_image, 1)
 			if rotate is True:
 				trimmed_image = test_google_image.rotate_if_tall(trimmed_image)
+			if trimmed_image.mode == 'RGBA' and trim_path.endswith('.jpg'):
+				trimmed_image = trimmed_image.convert('RGB')
 			trimmed_image.save(trim_path)
 			print(f"saved {trim_file}")
 		try:
