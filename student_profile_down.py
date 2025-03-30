@@ -16,6 +16,7 @@ from pillow_heif import register_heif_opener
 
 #Local
 import commonlib
+from tool_scripts import extract_faces
 from tool_scripts import test_google_image
 
 register_heif_opener()
@@ -34,6 +35,8 @@ elif 6 <= current_month <= 8:
 else:
 	semester = "3Fall"
 image_dir = f"{current_year}_{semester}"
+if not os.path.isdir(image_dir):
+	os.makedirs(image_dir)
 
 #============================================
 
@@ -55,75 +58,183 @@ def parse_args():
 	parser.add_argument('-r', '--rotate', dest='rotate', action='store_true')
 	parser.add_argument('--no-rotate', dest='rotate', action='store_false')
 	parser.set_defaults(rotate=False)
+	parser.add_argument('-f', '--face', dest='face', action='store_true')
+	parser.set_defaults(face=False)
 	args = parser.parse_args()
 	return args
 
 #============================================
 
-def get_image_html_tag(image_url: str, ruid: int, trim: bool=False, rotate: bool= False) -> str:
+#============================================
+
+def get_image_html_tag(image_url: str, ruid: int,
+		trim: bool=False, rotate: bool=False, face: bool=False) -> str:
 	"""
 	Download image from Google Drive and return an HTML tag linking to the local file.
+
+	Args:
+		image_url: Google Drive image URL
+		ruid: Record ID for naming
+		trim: Whether to auto-trim image
+		rotate: Whether to rotate tall images
+		face: Whether to extract cropped face
+
+	Returns:
+		str: HTML <img> tag(s) for the image
 	"""
 	clib = commonlib.CommonLib()
-	print(image_url)
-	# Extract file ID from the Google Drive URL
+
+	# Extract file ID and download image
 	file_id = test_google_image.get_file_id_from_google_drive_url(image_url)
-	print(file_id)
-	# Attempt to download the image
+	image_data, original_filename = try_download_image(file_id)
+
+	# Prepare filename and save
+	filename = format_filename(original_filename, ruid, clib)
+	filepath = os.path.abspath(os.path.join(image_dir, filename))
+	if not os.path.isfile(filepath):
+		was_saved = download_and_save_image(image_data, filepath)
+		if not was_saved:
+			return ''
+
+	# Optionally trim and rotate
+	trim_path = None
+	if trim:
+		trim_path = trim_and_save_image(filepath, rotate)
+
+	# Optionally extract face
+	face_path = None
+	if face:
+		face_path = extract_and_save_face(filepath)
+
+	# Build HTML
+	html_tag = f"<img border='3' src='file://{filepath}' height='250' />"
+	if trim and os.path.isfile(trim_path):
+		html_tag += f"<img border='3' src='file://{trim_path}' height='350' />"
+	if face and os.path.isfile(face_path):
+		html_tag += f"<img border='3' src='file://{face_path}' height='450' />"
+
+	print('')
+	return html_tag
+
+#============================================
+
+def try_download_image(file_id: str) -> tuple:
+	"""
+	Try downloading an image using service account.
+
+	Args:
+		file_id: Google Drive file ID
+
+	Returns:
+		tuple: (image data stream, original filename)
+	"""
 	global fail_count
 	try:
 		image_data, original_filename = test_google_image.download_image(file_id)
+		return image_data, original_filename
 	except googleapiclient.errors.HttpError as e:
 		fail_count += 1
-		# Print error message and wait before retrying
 		print(f"Error downloading image: {e}")
-		time.sleep(random.random())  # Prevent server overload
+		time.sleep(random.random())
 		print("check permissions of the folder for vosslab-12389@protein-images.iam.gserviceaccount.com")
 		if fail_count > 2:
 			raise ValueError
-		return ''
-	print(original_filename)
+		return None, ''
+
+#============================================
+
+def format_filename(original_filename: str, ruid: int, clib) -> str:
+	"""
+	Clean and normalize the filename for saving.
+
+	Args:
+		original_filename: Original filename
+		ruid: Record ID
+		clib: CommonLib instance for cleaning
+
+	Returns:
+		str: Normalized and extended filename
+	"""
 	filename = original_filename.lower()
 	basename = os.path.splitext(filename)[0]
 	basename = clib.cleanName(basename)
 	extension = os.path.splitext(filename)[-1]
 	filename = f"{ruid}-{basename}{extension}"
-	# Ensure the file has a valid image extension
 	if not filename.endswith('.jpg') and not filename.endswith('.png'):
 		filename = os.path.splitext(filename)[0] + '.jpg'
-	global image_dir
-	# Create the directory if it does not exist
-	if not os.path.isdir(image_dir):
-		os.makedirs(image_dir)
-	#print(filename)
-	if trim is True:
-		trim_file = os.path.splitext(filename)[0] + '-trim.jpg'
-		trim_path = os.path.abspath(os.path.join(image_dir, trim_file))
-	# Create the absolute file path
-	filepath = os.path.abspath(os.path.join(image_dir, filename))
-	# Save the image locally if it does not already exist
-	if not os.path.isfile(filename):
-		pil_image = PIL.Image.open(image_data)
-		pil_image.save(filepath)
-		print(f"saved {filename}")
-		if trim is True:
-			trimmed_image = test_google_image.multi_trim(pil_image, 1)
-			if rotate is True:
-				trimmed_image = test_google_image.rotate_if_tall(trimmed_image)
-			if trimmed_image.mode == 'RGBA' and trim_path.endswith('.jpg'):
-				trimmed_image = trimmed_image.convert('RGB')
-			trimmed_image.save(trim_path)
-			print(f"saved {trim_file}")
-		try:
-			os.remove(original_filename)
-		except FileNotFoundError:
-			pass
-	# Generate an HTML <img> tag with the local file path
-	html_tag = f"<img border='3' src='file://{filepath}' height='250' />"
-	if trim is True:
-		html_tag += f"<img border='1' src='file://{trim_path}' height='350' />"
-	print('')
-	return html_tag
+	return filename
+
+#============================================
+
+def download_and_save_image(image_data, filepath: str) -> bool:
+	"""
+	Save the downloaded image if not already present.
+
+	Args:
+		image_data: BytesIO image stream
+		filepath: Full path to save the image
+
+	Returns:
+		bool: True if saved, False if already existed
+	"""
+	if os.path.isfile(filepath):
+		return False
+	pil_image = PIL.Image.open(image_data)
+	pil_image.save(filepath)
+	print(f"saved {os.path.basename(filepath)}")
+	return True
+
+#============================================
+
+def trim_and_save_image(filepath: str, rotate: bool=False) -> str:
+	"""
+	Trim borders and optionally rotate the image, then save.
+
+	Args:
+		filepath: Original image path
+		rotate: Whether to rotate tall images
+
+	Returns:
+		str: Path to trimmed image
+	"""
+	pil_image = PIL.Image.open(filepath)
+	trimmed_image = test_google_image.multi_trim(pil_image, 1)
+	if rotate:
+		trimmed_image = test_google_image.rotate_if_tall(trimmed_image)
+	if trimmed_image.mode == 'RGBA' and filepath.endswith('.jpg'):
+		trimmed_image = trimmed_image.convert('RGB')
+	trim_path = os.path.splitext(filepath)[0] + '-trim.jpg'
+	trimmed_image.save(trim_path)
+	print(f"saved {os.path.basename(trim_path)}")
+	return trim_path
+
+#============================================
+def extract_and_save_face(filepath: str) -> str:
+	"""
+	Extract face from the given image and save cropped result.
+
+	Args:
+		filepath: Path to full input image
+
+	Returns:
+		str: Path to saved face image, or empty string if none found
+	"""
+	print(f"detecting face in image: {os.path.basename(filepath)}")
+	face_path = os.path.splitext(filepath)[0] + '-face.jpg'
+	if os.path.isfile(face_path):
+		print(f"[ok] Face image exists: {os.path.basename(face_path)}")
+		return face_path
+	success = extract_faces.process_image(filepath, face_path)
+
+	if success and os.path.isfile(face_path):
+		print(f"[ok] Face image saved: {os.path.basename(face_path)}")
+		return face_path
+	else:
+		print(f"[fail] Face did not work")
+		# Remove file if created but face was not found
+		if os.path.isfile(face_path):
+			os.remove(face_path)
+		return ''
 
 #============================================
 
@@ -181,8 +292,7 @@ def read_csv(csvfile: str, maxstudents: int) -> tuple:
 	"""
 	# Check if the file exists
 	if not os.path.exists(csvfile):
-		print(f"Error: File '{csvfile}' does not exist.")
-		sys.exit(1)
+		raise ValueError(f"Error: File '{csvfile}' does not exist.")
 
 	data_tree = []
 	first_name_key_index = None
@@ -209,14 +319,10 @@ def read_csv(csvfile: str, maxstudents: int) -> tuple:
 
 #============================================
 
-def generate_html(csvfile: str, header: list, data_tree: list, trim: bool=False, rotate: bool=False):
+def generate_html(csvfile: str, header: list, data_tree: list,
+		trim: bool=False, rotate: bool=False, face: bool=False):
 	"""
 	Generate an HTML file based on the CSV data.
-
-	Args:
-		csvfile (str): Path to the original CSV file.
-		header (list): The header row from the CSV file.
-		data_tree (list): Sorted list of CSV data rows.
 	"""
 	# Define the output HTML filename
 	output_filename = "profiles.html"
@@ -244,7 +350,7 @@ def generate_html(csvfile: str, header: list, data_tree: list, trim: bool=False,
 					ruid = int(item)
 				# Process URLs as images
 				elif item.startswith('http'):
-					img_html_tag = get_image_html_tag(item, ruid, trim, rotate)
+					img_html_tag = get_image_html_tag(item, ruid, trim, rotate, face)
 					output.write(f"{img_html_tag}\n")
 				# Regular text fields
 				else:
@@ -275,7 +381,7 @@ def main():
 	header, data_tree = read_csv(args.csvfile, args.maxstudents)
 
 	# Generate the HTML file
-	generate_html(args.csvfile, header, data_tree, args.trim, args.rotate)
+	generate_html(args.csvfile, header, data_tree, args.trim, args.rotate, args.face)
 
 	# Open the generated HTML file in the browser
 	open_html_in_browser()
