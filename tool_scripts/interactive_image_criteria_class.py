@@ -93,7 +93,7 @@ class process_image_questions_class():
 	#==========================================
 	def make_question_incorrect(self, student_entry: dict, q_name: str, almost: bool=False) -> None:
 		# Update the student's record based on the question
-		question_dict = self.image_questions_dict[q_name]
+		question_dict = self.image_questions_dict.get(q_name, {})
 		point_deduction = question_dict.get('point_deduction', 0)
 		if almost is True:
 			point_deduction = round(float(point_deduction) / 2.0, 1)
