@@ -16,7 +16,10 @@ from pillow_heif import register_heif_opener
 
 #Local
 import commonlib
-from tool_scripts import extract_faces
+try:
+	from tool_scripts import extract_faces
+except ImportError:
+	pass
 from tool_scripts import test_google_image
 
 register_heif_opener()
@@ -180,6 +183,7 @@ def download_and_save_image(image_data, filepath: str) -> bool:
 	if os.path.isfile(filepath):
 		return False
 	pil_image = PIL.Image.open(image_data)
+
 	pil_image.save(filepath)
 	print(f"saved {os.path.basename(filepath)}")
 	return True
@@ -201,7 +205,7 @@ def trim_and_save_image(filepath: str, rotate: bool=False) -> str:
 	trimmed_image = test_google_image.multi_trim(pil_image, 1)
 	if rotate:
 		trimmed_image = test_google_image.rotate_if_tall(trimmed_image)
-	if trimmed_image.mode == 'RGBA' and filepath.endswith('.jpg'):
+	if trimmed_image.mode != 'RGB':
 		trimmed_image = trimmed_image.convert('RGB')
 	trim_path = os.path.splitext(filepath)[0] + '-trim.jpg'
 	trimmed_image.save(trim_path)
