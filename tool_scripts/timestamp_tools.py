@@ -104,7 +104,10 @@ def check_due_date(entry_timestamp: str, config: dict) -> tuple:
 	due_date_str = config["deadline"]["due date"] + " 11:59:59 PM"
 
 	# Convert due_date and entry_timestamp to datetime objects
-	due_date = datetime.strptime(due_date_str, "%b %d, %Y %I:%M:%S %p")
+	try:
+		due_date = datetime.strptime(due_date_str, "%b %d, %Y %I:%M:%S %p")
+	except ValueError:
+		due_date = datetime.strptime(due_date_str, "%B %d, %Y %I:%M:%S %p")
 	entry_datetime = datetime.strptime(entry_timestamp[:-4].strip(), "%Y/%m/%d %I:%M:%S %p")
 
 	# Calculate the difference in hours between due_date and entry_datetime
