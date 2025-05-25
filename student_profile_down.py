@@ -2,6 +2,7 @@
 
 # Standard Library
 import os
+import re
 import sys
 import csv
 import time
@@ -63,6 +64,24 @@ def parse_args():
 	parser.set_defaults(rotate=False)
 	parser.add_argument('-f', '--face', dest='face', action='store_true')
 	parser.set_defaults(face=False)
+
+	type_group = parser.add_mutually_exclusive_group(required=True)
+	type_group.add_argument(
+		'--type', dest='image_type', type=str,
+		choices=('students', 'proteins'),
+		help='Set the question type: num (numeric) or mc (multiple choice)'
+	)
+	type_group.add_argument(
+		'-s', '--students', dest='image_type', action='store_const', const='students',
+		help='Set image type to students'
+	)
+	type_group.add_argument(
+		'-p', '--proteins', dest='image_type', action='store_const', const='proteins',
+		help='Set image type to proteins'
+	)
+	parser.add_argument('--image_number', dest='image_number', default=0,
+		type=int, required=False,)
+
 	args = parser.parse_args()
 	return args
 
@@ -70,50 +89,48 @@ def parse_args():
 
 #============================================
 
-def get_image_html_tag(image_url: str, ruid: int,
-		trim: bool=False, rotate: bool=False, face: bool=False) -> str:
+def get_image_html_tag(image_url: str, ruid: int, args) -> str:
 	"""
 	Download image from Google Drive and return an HTML tag linking to the local file.
 
 	Args:
 		image_url: Google Drive image URL
 		ruid: Record ID for naming
-		trim: Whether to auto-trim image
-		rotate: Whether to rotate tall images
-		face: Whether to extract cropped face
+		args
 
 	Returns:
 		str: HTML <img> tag(s) for the image
 	"""
-	clib = commonlib.CommonLib()
 
 	# Extract file ID and download image
 	file_id = test_google_image.get_file_id_from_google_drive_url(image_url)
 	image_data, original_filename = try_download_image(file_id)
 
 	# Prepare filename and save
-	filename = format_filename(original_filename, ruid, clib)
+	filename = format_filename(original_filename, ruid, args)
 	filepath = os.path.abspath(os.path.join(image_dir, filename))
-	if not os.path.isfile(filepath):
+	if not os.path.exists(filepath):
 		was_saved = download_and_save_image(image_data, filepath)
 		if not was_saved:
 			return ''
+	else:
+		print(f"file exists: {filename}")
 
 	# Optionally trim and rotate
 	trim_path = None
-	if trim:
-		trim_path = trim_and_save_image(filepath, rotate)
+	if args.trim:
+		trim_path = trim_and_save_image(filepath, args.rotate)
 
 	# Optionally extract face
 	face_path = None
-	if face:
+	if args.face:
 		face_path = extract_and_save_face(filepath)
 
 	# Build HTML
 	html_tag = f"<img border='3' src='file://{filepath}' height='250' />"
-	if trim and os.path.isfile(trim_path):
+	if args.trim and os.path.isfile(trim_path):
 		html_tag += f"<img border='3' src='file://{trim_path}' height='350' />"
-	if face and os.path.isfile(face_path):
+	if args.face and os.path.isfile(face_path):
 		html_tag += f"<img border='3' src='file://{face_path}' height='450' />"
 
 	print('')
@@ -146,7 +163,7 @@ def try_download_image(file_id: str) -> tuple:
 
 #============================================
 
-def format_filename(original_filename: str, ruid: int, clib) -> str:
+def format_filename(original_filename: str, ruid: int, args) -> str:
 	"""
 	Clean and normalize the filename for saving.
 
@@ -158,11 +175,17 @@ def format_filename(original_filename: str, ruid: int, clib) -> str:
 	Returns:
 		str: Normalized and extended filename
 	"""
+	clib = commonlib.CommonLib()
 	filename = original_filename.lower()
 	basename = os.path.splitext(filename)[0]
 	basename = clib.cleanName(basename)
 	extension = os.path.splitext(filename)[-1]
-	filename = f"{ruid}-{basename}{extension}"
+	if args.image_type == "students":
+		filename = f"{ruid}-profile-{basename}{extension}"
+	elif args.image_type == "proteins":
+		filename = f"{ruid}-protein{args.image_number:02d}-{basename}{extension}"
+	else:
+		sys.exit(1)
 	if not filename.endswith('.jpg') and not filename.endswith('.png'):
 		filename = os.path.splitext(filename)[0] + '.jpg'
 	return filename
@@ -321,15 +344,34 @@ def read_csv(csvfile: str, maxstudents: int) -> tuple:
 
 	return header, data_tree
 
+def extract_number_in_range(s: str) -> int:
+	"""Extract the first integer between 1 and 20 (inclusive) from the string.
+
+	Args:
+		s: The input string which may contain digits.
+
+	Returns:
+		The integer if found, otherwise raises ValueError.
+	"""
+	# Find all 1 or 2 digit numbers
+	matches = re.findall(r'\d{1,2}', s)
+	for match in matches:
+		num = int(match)
+		if 1 <= num <= 20:
+			return num
+	print(f"No number in range 1-20 found in string: {s}")
+	sys.exit(1)
+
 #============================================
 
-def generate_html(csvfile: str, header: list, data_tree: list,
-		trim: bool=False, rotate: bool=False, face: bool=False):
+def generate_html(csvfile: str, header: list, data_tree: list, args):
 	"""
 	Generate an HTML file based on the CSV data.
 	"""
 	# Define the output HTML filename
 	output_filename = "profiles.html"
+	if args.image_type == "proteins":
+		args.image_number = extract_number_in_range(csvfile)
 
 	# Open the output file and write the HTML content
 	with open(output_filename, "w") as output:
@@ -354,7 +396,7 @@ def generate_html(csvfile: str, header: list, data_tree: list,
 					ruid = int(item)
 				# Process URLs as images
 				elif item.startswith('http'):
-					img_html_tag = get_image_html_tag(item, ruid, trim, rotate, face)
+					img_html_tag = get_image_html_tag(item, ruid, args)
 					output.write(f"{img_html_tag}\n")
 				# Regular text fields
 				else:
@@ -385,7 +427,7 @@ def main():
 	header, data_tree = read_csv(args.csvfile, args.maxstudents)
 
 	# Generate the HTML file
-	generate_html(args.csvfile, header, data_tree, args.trim, args.rotate, args.face)
+	generate_html(args.csvfile, header, data_tree, args)
 
 	# Open the generated HTML file in the browser
 	open_html_in_browser()
