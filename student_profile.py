@@ -6,6 +6,8 @@ import csv
 import urllib.request, urllib.parse, urllib.error
 import subprocess
 
+from tool_scripts import test_google_image
+
 google_id = 1
 #google_id = 2
 
@@ -31,7 +33,8 @@ def normalize_google_drive_url(image_url: str) -> str:
 	query = urllib.parse.parse_qs(url_parts.query)
 
 	# Extract the file_id from the query parameters
-	file_id = query['id'][0] if 'id' in query else None
+	#file_id = query['id'][0] if 'id' in query else None
+	file_id = test_google_image.get_file_id_from_google_drive_url(image_url)
 
 	# If file_id is None, return None as we can't proceed without a file ID
 	if file_id is None:
@@ -114,7 +117,8 @@ for row in data_tree:
 
 f.close()
 output.close()
-cmd = "open -a /Applications/Google\ Chrome.app profiles.html"
-cmd = "open -a /Applications/Vivaldi.app profiles.html"
+#cmd = "open -a /Applications/Google\ Chrome.app profiles.html"
+#cmd = "open -a /Applications/Vivaldi.app profiles.html"
+cmd = "open -a /Applications/Firefox.app profiles.html"
 proc = subprocess.Popen(cmd, shell=True)
 proc.communicate()
