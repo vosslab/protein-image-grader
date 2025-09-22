@@ -20,6 +20,7 @@ import commonlib
 try:
 	from tool_scripts import extract_faces
 except ImportError:
+	print("extract_faces not imported")
 	pass
 from tool_scripts import test_google_image
 
