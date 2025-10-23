@@ -236,7 +236,7 @@ def sum_investment(data: list, investment_columns: list) -> int:
 #==============
 def get_top_awards(data: list, awards_columns: list) -> None:
 	"""
-	For each award, returns the top 3 companies based on the number of occurrences.
+	For each award, returns the top companies based on the number of occurrences.
 
 	Args:
 		data (list): List of rows (dictionaries) from the CSV file.
@@ -264,18 +264,18 @@ def get_top_awards(data: list, awards_columns: list) -> None:
 				award_tallies[award_name][company_info] += 1
 				cells_processed += 1
 
-	# Output the top 3 companies for each award
+	# Output the top companies for each award
 	print(f"\nINFO: Awards Processing")
 	print(f"  - Cells processed: {cells_processed}\n")
 
 	for award, companies in award_tallies.items():
 		# Sort companies by vote count in descending order
 		sorted_companies = sorted(companies.items(), key=lambda x: x[1], reverse=True)
-		top_3_companies = sorted_companies[:3]  # Get the top 3 companies
+		top_companies = sorted_companies[:4]  # Get the top companies
 
-		# Output the award and its top 3 companies, including vote count
+		# Output the award and its top companies, including vote count
 		print(f"{award}:")
-		for company, count in top_3_companies:
+		for company, count in top_companies:
 			print(f". {company} ({count} votes)")  # Print the company name and the vote count
 		print()  # Add a blank line after each award
 
