@@ -271,7 +271,7 @@ def get_top_awards(data: list, awards_columns: list) -> None:
 	for award, companies in award_tallies.items():
 		# Sort companies by vote count in descending order
 		sorted_companies = sorted(companies.items(), key=lambda x: x[1], reverse=True)
-		top_companies = sorted_companies[:4]  # Get the top companies
+		top_companies = sorted_companies[:6]  # Get the top companies
 
 		# Output the award and its top companies, including vote count
 		print(f"{award}:")
