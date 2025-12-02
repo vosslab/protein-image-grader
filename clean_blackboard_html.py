@@ -17,6 +17,32 @@ def main():
     # 1) Remove <script>…</script>
     html = re.sub(r'(?is)<script\b[^>]*>.*?</script>', '', html)
 
+    # Replace <h3…</h3>
+    html = re.sub(
+        r'<h3\b([^>]*)>(.*?)</h3>',
+        r'<h5>\2</h5>',
+        html,
+        flags=re.DOTALL
+    )
+
+    html = re.sub(
+        r'style="position:relative;"',
+        r'style="position:relative; margin-bottom:0; padding-bottom:0;"',
+        html, flags=re.DOTALL
+    )
+
+    html = re.sub(
+        r'style="position:relative;"',
+        r'style="position:relative; margin-bottom:0; padding-top:0; padding-bottom:0;"',
+        html
+    )
+
+    html = re.sub(
+        r'<li>\s*',
+        r'<li style="padding:0;">',
+        html
+    )
+
     # 2) Remove <button>…</button>
     html = re.sub(r'(?is)<button\b[^>]*>.*?</button>', '', html)
 
