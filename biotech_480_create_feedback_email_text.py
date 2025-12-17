@@ -67,15 +67,16 @@ def parse_args():
 		argparse.Namespace: Parsed args.
 	"""
 	epilog = ""
-	epilog += "Outputs:\n"
-	epilog += "\n"
 	epilog += "Example:\n"
 	epilog += "  biotech_480_create_feedback_email_text.py \\\n"
 	epilog += "    -i 480_F25_W1_Group_Present_Eval.csv \\\n"
 	epilog += "    -o output_peer_feedback/\n"
 
 	parser = argparse.ArgumentParser(
-		description="Extract presenter-visible peer feedback text from BioTech 480 group peer eval CSV exports.",
+		description=(
+			"Create per-group email text files from a BioTech 480 peer-eval CSV.\n"
+			"Includes: PRODUCT, SUMMARY, BEST, NEEDS IMPROVEMENT (anonymized)."
+		),
 		formatter_class=argparse.RawTextHelpFormatter,
 		epilog=epilog,
 	)
@@ -222,11 +223,14 @@ def select_key_columns_for_block(
 	Returns:
 		dict[str, str]: category -> header.
 	"""
-	patterns: list[tuple[str, re.Pattern]] = [
-		("PRODUCT", re.compile(r"\bmain\s+PRODUCT\b", flags=re.IGNORECASE)),
-		("SUMMARY", re.compile(r"\bshort\s+SUMMARY\b", flags=re.IGNORECASE)),
-		("BEST", re.compile(r"\bBEST\s+part\b", flags=re.IGNORECASE)),
-		("NEEDS IMPROVEMENT", re.compile(r"\bNEEDS\s+IMPROVEMENT\b", flags=re.IGNORECASE)),
+	# These keywords are intentionally case-sensitive. In your form headers, the
+	# key columns are distinguished by the capitalized words:
+	# PRODUCT, SUMMARY, BEST, NEEDS IMPROVEMENT
+	keywords: list[str] = [
+		"PRODUCT",
+		"SUMMARY",
+		"BEST",
+		"NEEDS IMPROVEMENT",
 	]
 
 	found: dict[str, str] = {}
@@ -235,14 +239,14 @@ def select_key_columns_for_block(
 		if is_excluded_column(base, exclude_regex):
 			continue
 
-		for key, pat in patterns:
+		for key in keywords:
 			if key in found:
 				continue
-			if pat.search(base):
+			if key in base:
 				found[key] = h
 
 	out: dict[str, str] = {}
-	for key, _pat in patterns:
+	for key in keywords:
 		h = found.get(key)
 		if h is None:
 			continue
