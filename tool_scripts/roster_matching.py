@@ -23,9 +23,16 @@ __all__ = [
 	"match_submission",
 	"normalize_name_text",
 	"normalize_username",
+	"prompt_choice",
 	"read_roster",
 	"safe_int",
 ]
+
+
+#============================================
+def ansi_wrap(text: str, code: str) -> str:
+	"""Wrap text with an ANSI color code."""
+	return f"\033[{code}m{text}\033[0m"
 
 
 #============================================
@@ -76,14 +83,23 @@ def parse_args() -> argparse.Namespace:
 		help="Do not write output files, only print a summary",
 	)
 	match_group.add_argument(
+		"--require-match", dest="require_match", action="store_true",
+		help="Require every row to match a roster student (will prompt when interactive)",
+	)
+	match_group.add_argument(
+		"--allow-unmatched", dest="require_match", action="store_false",
+		help="Allow unmatched rows (default)",
+	)
+	match_group.add_argument(
 		"-y", "--interactive", dest="interactive", action="store_true",
 		help="Prompt to approve non-obvious matches",
 	)
 	match_group.add_argument(
 		"-Y", "--no-interactive", dest="interactive", action="store_false",
-		help="Do not prompt (default)",
+		help="Do not prompt",
 	)
-	parser.set_defaults(interactive=False)
+	parser.set_defaults(interactive=True)
+	parser.set_defaults(require_match=False)
 
 	match_group.add_argument(
 		"-t", "--threshold", dest="auto_threshold", type=float, default=0.88,
@@ -207,6 +223,8 @@ def build_roster_indexes(roster: dict[int, dict]) -> dict:
 	"""Build lookup tables for fast matching."""
 	by_username: dict[str, int] = {}
 	by_name: dict[str, list[int]] = {}
+	by_first_unique: dict[str, int] = {}
+	first_counts: dict[str, int] = {}
 
 	for student_id, info in roster.items():
 		username = normalize_username(info.get("username", ""))
@@ -231,9 +249,28 @@ def build_roster_indexes(roster: dict[int, dict]) -> dict:
 		if alias:
 			by_name.setdefault(alias, []).append(int(student_id))
 
+		first_name = normalize_name_text(info.get("first_name", ""))
+		last_name = normalize_name_text(info.get("last_name", ""))
+		if first_name and last_name:
+			last_initial = last_name[0]
+			first_last_initial = normalize_name_text(first_name + " " + last_initial)
+			if first_last_initial:
+				by_name.setdefault(first_last_initial, []).append(int(student_id))
+
+		if first_name:
+			first_counts[first_name] = first_counts.get(first_name, 0) + 1
+
+	for student_id, info in roster.items():
+		first_name = normalize_name_text(info.get("first_name", ""))
+		if not first_name:
+			continue
+		if first_counts.get(first_name, 0) == 1:
+			by_first_unique[first_name] = int(student_id)
+
 	return {
 		"by_username": by_username,
 		"by_name": by_name,
+		"by_first_unique": by_first_unique,
 	}
 
 
@@ -248,6 +285,7 @@ class RosterMatcher:
 		self,
 		roster: dict[int, dict],
 		interactive: bool = False,
+		require_match: bool = False,
 		auto_threshold: float = 0.88,
 		auto_gap: float = 0.06,
 		candidate_count: int = 5,
@@ -255,6 +293,7 @@ class RosterMatcher:
 		self.roster = roster
 		self.indexes = build_roster_indexes(roster)
 		self.interactive = interactive
+		self.require_match = require_match
 		self.auto_threshold = auto_threshold
 		self.auto_gap = auto_gap
 		self.candidate_count = candidate_count
@@ -292,6 +331,7 @@ class RosterMatcher:
 			roster=self.roster,
 			indexes=self.indexes,
 			interactive=self.interactive,
+			require_match=self.require_match,
 			auto_threshold=self.auto_threshold,
 			auto_gap=self.auto_gap,
 			candidate_count=self.candidate_count,
@@ -382,6 +422,20 @@ def similarity(a: str, b: str) -> float:
 		return 0.0
 	return difflib.SequenceMatcher(a=a, b=b).ratio()
 
+#============================================
+def looks_like_username_or_email(text: str) -> bool:
+	"""Heuristic: return True when text looks like a username/email, not a display name."""
+	value = (text or "").strip()
+	if not value:
+		return False
+	if "@" in value:
+		return True
+	if " " in value:
+		return False
+	if re.search(r"[^a-z0-9._-]", value.lower()):
+		return False
+	return True
+
 
 #============================================
 def score_candidate(sub: dict, roster_row: dict) -> float:
@@ -394,13 +448,28 @@ def score_candidate(sub: dict, roster_row: dict) -> float:
 	sub_first = normalize_name_text(sub.get("first_name", ""))
 	sub_last = normalize_name_text(sub.get("last_name", ""))
 	sub_full = (sub_first + " " + sub_last).strip()
+	sub_name_for_alias = sub_full if sub_full else sub_first
+	sub_first_token = sub_name_for_alias.split(" ", 1)[0] if sub_name_for_alias else ""
 
 	ro_user = normalize_username(roster_row.get("username", ""))
 	ro_full = normalize_name_text(roster_row.get("full_name", ""))
 	ro_last = normalize_name_text(roster_row.get("last_name", ""))
+	ro_alias = normalize_name_text(roster_row.get("alias", ""))
+	ro_alias_token = ro_alias.split(" ", 1)[0] if ro_alias else ""
 
 	name_score = similarity(sub_full, ro_full) if sub_full and ro_full else 0.0
 	last_score = similarity(sub_last, ro_last) if sub_last and ro_last else 0.0
+	alias_score = 0.0
+	if ro_alias:
+		alias_full = similarity(sub_name_for_alias, ro_alias) if sub_name_for_alias else 0.0
+		alias_token = similarity(sub_first_token, ro_alias_token) if sub_first_token and ro_alias_token else 0.0
+		if len(sub_first_token) < 4 or len(ro_alias_token) < 4:
+			alias_token = 0.0
+		if alias_token < 0.80:
+			alias_token = 0.0
+		alias_score = max(alias_full, alias_token)
+		if alias_score > name_score:
+			name_score = alias_score
 	user_score = 0.0
 	if sub_user and ro_user:
 		user_score = max(similarity(sub_user, ro_user), similarity(sub_user_nodigits, ro_user))
@@ -408,7 +477,25 @@ def score_candidate(sub: dict, roster_row: dict) -> float:
 	if not sub_full:
 		return user_score
 
-	return (0.70 * name_score) + (0.20 * last_score) + (0.10 * user_score)
+	use_user = looks_like_username_or_email(sub.get("username", "")) and bool(sub_user) and bool(ro_user)
+	use_last = bool(sub_last) and bool(ro_last)
+
+	weights: dict[str, float] = {"name": 0.70}
+	if use_last:
+		weights["last"] = 0.20
+	if use_user:
+		weights["user"] = 0.10
+
+	total_weight = sum(weights.values())
+	if total_weight <= 0:
+		return 0.0
+
+	score = (weights["name"] * name_score)
+	if use_last:
+		score += (weights["last"] * last_score)
+	if use_user:
+		score += (weights["user"] * user_score)
+	return score / total_weight
 
 
 #============================================
@@ -429,11 +516,16 @@ def prompt_choice(sub: dict, candidates: list[tuple[int, float]], roster: dict[i
 	"""Prompt the user to choose a match."""
 	print("")
 	print("Student match needs review:")
-	print(
+	sub_id = safe_int(sub.get("student_id", ""))
+	sub_id_text = str(sub.get("student_id", "") or "").strip()
+	print(ansi_wrap(
 		"Submitted: " +
 		f"{sub.get('first_name','')} {sub.get('last_name','')} | " +
-		f"ID={sub.get('student_id','')} | Username={sub.get('username','')}"
-	)
+		f"ID={sub_id_text} | Username={sub.get('username','')}",
+		"93",
+	))
+	if sub_id is not None and sub_id not in roster:
+		print(f"NOTE: Submitted ID {sub_id} is not present in the roster.")
 	print("Candidates:")
 	for i, (student_id, score) in enumerate(candidates, start=1):
 		row = roster.get(student_id, {})
@@ -441,8 +533,12 @@ def prompt_choice(sub: dict, candidates: list[tuple[int, float]], roster: dict[i
 		user = row.get("username", "")
 		print(f"  {i}) {student_id} | {full} | {user} | score={score:.3f}")
 	print("  0) No match")
+	print("  Or enter a Student ID directly")
+	print("  q) Quit (fix roster / rerun with allow-unmatched)")
 
 	value = input("Select match number (0 for no match): ").strip()
+	if value.strip().lower() in ("q", "quit", "exit"):
+		raise SystemExit("Aborted by user. Fix roster or rerun allowing unmatched.")
 	choice = safe_int(value)
 	if choice is None:
 		return None
@@ -450,7 +546,40 @@ def prompt_choice(sub: dict, candidates: list[tuple[int, float]], roster: dict[i
 		return None
 	if 1 <= choice <= len(candidates):
 		return candidates[choice - 1][0]
+	if choice in roster:
+		return int(choice)
 	return None
+
+
+#============================================
+def prompt_manual_student_id(sub: dict, roster: dict[int, dict], allow_no_match: bool) -> int | None:
+	"""Prompt the user to manually enter a Student ID."""
+	print("")
+	print("Manual roster match:")
+	print(ansi_wrap(
+		"Submitted: " +
+		f"{sub.get('first_name','')} {sub.get('last_name','')} | " +
+		f"ID={sub.get('student_id','')} | Username={sub.get('username','')}",
+		"93",
+	))
+
+	while True:
+		if allow_no_match:
+			value = input("Enter Student ID (or 0 for no match; q to quit): ").strip()
+		else:
+			value = input("Enter Student ID (q to quit): ").strip()
+
+		if value.strip().lower() in ("q", "quit", "exit"):
+			raise SystemExit("Aborted by user. Fix roster or rerun allowing unmatched.")
+		choice = safe_int(value)
+		if choice is None:
+			print("Invalid Student ID. Try again.")
+			continue
+		if allow_no_match and choice == 0:
+			return None
+		if choice in roster:
+			return int(choice)
+		print("Student ID not found in roster. Try again.")
 
 
 #============================================
@@ -462,6 +591,7 @@ def match_submission(
 	auto_threshold: float,
 	auto_gap: float,
 	candidate_count: int,
+	require_match: bool = False,
 ) -> tuple[int | None, str, float]:
 	"""Match one submission to a roster student id."""
 
@@ -489,9 +619,22 @@ def match_submission(
 		if len(ids) == 1:
 			return int(ids[0]), "name_exact", 1.0
 
+	sub_first = normalize_name_text(sub.get("first_name", ""))
+	sub_last = normalize_name_text(sub.get("last_name", ""))
+	if sub_first and not sub_last:
+		by_first_unique = indexes.get("by_first_unique", {})
+		if sub_first in by_first_unique:
+			return int(by_first_unique[sub_first]), "first_unique", 1.0
+
 	candidates = rank_candidates(sub, roster, max(candidate_count, 2))
 	if not candidates:
-		return None, "no_candidates", 0.0
+		if not interactive:
+			return None, "no_candidates", 0.0
+		allow_no_match = not require_match
+		chosen_id = prompt_manual_student_id(sub, roster, allow_no_match=allow_no_match)
+		if chosen_id is None:
+			return None, "rejected", 0.0
+		return int(chosen_id), "manual_id", 0.0
 
 	best_id, best_score = candidates[0]
 	runner_up = candidates[1][1] if len(candidates) > 1 else 0.0
@@ -500,13 +643,26 @@ def match_submission(
 	if best_score >= auto_threshold and gap >= auto_gap:
 		return int(best_id), "auto", float(best_score)
 
+	min_score = max(0.70, float(auto_threshold) - 0.18)
+	min_gap = max(0.20, float(auto_gap) * 3.0)
+	if best_score >= min_score and gap >= min_gap:
+		return int(best_id), "auto_gap", float(best_score)
+
 	if not interactive:
 		return None, "needs_review", float(best_score)
 
+	allow_no_match = not require_match
 	chosen = prompt_choice(sub, candidates[:candidate_count], roster)
-	if chosen is None:
+	if chosen is not None:
+		return int(chosen), "chosen", float(best_score)
+	if allow_no_match:
 		return None, "rejected", float(best_score)
-	return int(chosen), "chosen", float(best_score)
+
+	print("A match is required. Enter a roster Student ID or 'q' to quit.")
+	chosen_id = prompt_manual_student_id(sub, roster, allow_no_match=False)
+	if chosen_id is None:
+		return None, "rejected", float(best_score)
+	return int(chosen_id), "manual_id", float(best_score)
 
 
 #============================================
@@ -539,9 +695,12 @@ def main() -> None:
 		raise FileNotFoundError(args.input_csv)
 
 	roster = load_roster(args.roster_csv)
+	if getattr(args, "require_match", False) and not args.interactive:
+		args.interactive = True
 	matcher = RosterMatcher(
 		roster=roster,
 		interactive=args.interactive,
+		require_match=getattr(args, "require_match", False),
 		auto_threshold=args.auto_threshold,
 		auto_gap=args.auto_gap,
 		candidate_count=args.candidate_count,

@@ -2,12 +2,13 @@
 import re
 import sys
 import time
-import difflib
 from collections import defaultdict
 
 from rich.console import Console
 from rich.style import Style
 from rich.text import Text
+
+from tool_scripts import roster_matching
 
 console = Console()
 warning_color = Style(color="rgb(255, 187, 51)" )  # RGB for bright orange
@@ -252,55 +253,41 @@ assert result == '12 john'
 
 
 #==============
-def find_closest_match(normalized_key: str, name_to_record: dict) -> str:
+def build_roster_from_student_ids_tree(student_ids_tree: list) -> dict:
 	"""
-	Find the closest matching key in a name-to-record dictionary.
+	Build a roster_matching-compatible roster from a list of student-id records.
 
 	Parameters
 	----------
-	normalized_key : str
-		The key generated from a student entry to be matched.
-
-	name_to_record : dict
-		Dictionary whose keys are normalized names, and values are student records.
+	student_ids_tree : list
+		List of dictionaries containing roster records.
 
 	Returns
 	-------
-	str
-		The closest matching key found in name_to_record.
+	dict
+		A dict keyed by student_id (int) with normalized fields for matching, plus a '_raw' record.
 	"""
-
-	# Try to find the best match with a high cutoff value
-	best_match = difflib.get_close_matches(
-		normalized_key,
-		name_to_record.keys(),
-		n=1,
-		cutoff=0.9
-	)
-	# If no match is found, lower the cutoff value and try again
-	if not best_match:
-		print(f"No automatic match for {normalized_key}")
-		best_match = difflib.get_close_matches(
-			normalized_key,
-			name_to_record.keys(),
-			n=1,
-			cutoff=0.4
+	roster: dict[int, dict] = {}
+	for row in student_ids_tree:
+		student_id = roster_matching.safe_int(row.get("Student ID", "") or row.get("StudentID", ""))
+		if student_id is None:
+			continue
+		first_name = roster_matching.normalize_name_text(row.get("First Name", "") or row.get("First", ""))
+		last_name = roster_matching.normalize_name_text(row.get("Last Name", "") or row.get("Last", ""))
+		username = roster_matching.normalize_username(row.get("Username", ""))
+		alias = roster_matching.normalize_name_text(
+			row.get("Alias", "") or row.get("Phonetic", "") or row.get("Preferred", "")
 		)
-		# If still no match, exit the program
-		if not best_match:
-			print(f"{normalized_key} NOT FOUND")
-			print('no matches found at all.')
-			sys.exit(1)
-
-		# Ask for user validation for the found match
-		matched_name = best_match[0]
-		print(f"A: {matched_name}")
-		print(f"B: {normalized_key}")
-		validation = get_input_validation("    is this a good match?", 'yn')  # Assuming get_input_validation is defined
-		if validation == 'n':
-			print("Please edit the CSV file and try again.")
-			sys.exit(1)
-	return best_match[0]
+		roster[int(student_id)] = {
+			"student_id": int(student_id),
+			"first_name": first_name,
+			"last_name": last_name,
+			"username": username,
+			"alias": alias,
+			"full_name": (first_name + " " + last_name).strip(),
+			"_raw": row,
+		}
+	return roster
 
 #==============
 def merge_student_records(student_entry: dict, student_id_record: dict, merge_keys=None) -> None:
@@ -362,37 +349,37 @@ def match_lists_and_add_student_ids(student_ids_tree: list, student_tree: list) 
 	None
 	"""
 
-	# Set to hold all the normalized_keys that have been assigned
-	assigned_normalized_keys_set = set()
+	roster = build_roster_from_student_ids_tree(student_ids_tree)
+	matcher = roster_matching.RosterMatcher(
+		roster=roster,
+		interactive=True,
+		auto_threshold=0.90,
+		auto_gap=0.06,
+		candidate_count=5,
+	)
 
-	# Keys used to normalize student entries
-	keys_used_to_normalize = ('Student ID', 'First Name', 'Last Name')
-
-	# Dictionary to match normalized_keys to student_entries
-	name_to_record = {}
-	for student_id_entry in student_ids_tree:
-		normalized_key = student_entry_to_normalized_key(student_id_entry, keys_used_to_normalize)
-		name_to_record[normalized_key] = student_id_entry
-
+	assigned_student_ids_set = set()
 	for student_entry in student_tree:
-		normalized_key = student_entry_to_normalized_key(student_entry, keys_used_to_normalize)
-		matched_name = find_closest_match(normalized_key, name_to_record)
-
-		# Get the student_id_record for matched_name
-		student_id_record = name_to_record[matched_name]
-
-		# Check if the new normalized_key after merging will be unique
-		new_normalized_key = student_entry_to_normalized_key(student_id_record, keys_used_to_normalize)
-
-		if new_normalized_key in assigned_normalized_keys_set:
-			print(f"WARNING: The normalized_key {new_normalized_key} would be duplicated.")
+		matched_id, reason, score = matcher.match(
+			username=student_entry.get("Username", ""),
+			first_name=student_entry.get("First Name", ""),
+			last_name=student_entry.get("Last Name", ""),
+			student_id=str(student_entry.get("Student ID", "")),
+		)
+		if matched_id is None:
+			print("Could not match a student to the roster:")
+			print(student_entry)
 			print("Please edit the CSV file and try again.")
 			sys.exit(1)
 
-		# Update the set with the new normalized_key
-		assigned_normalized_keys_set.add(new_normalized_key)
+		if matched_id in assigned_student_ids_set:
+			print(f"WARNING: Duplicate roster match for Student ID {matched_id}.")
+			print("Please edit the CSV file and try again.")
+			sys.exit(1)
+		assigned_student_ids_set.add(matched_id)
 
-		print(f"{matched_name} <=> {normalized_key}")
-		merge_student_records(student_entry, student_id_record)
+		roster_row = roster.get(matched_id, {})
+		raw = roster_row.get("_raw", {})
+		print(f"{matched_id} {roster_row.get('full_name','')} <= {reason} score={score:.3f}")
+		merge_student_records(student_entry, raw)
 	print('\n\n')
-

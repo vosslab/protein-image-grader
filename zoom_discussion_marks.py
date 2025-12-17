@@ -2,32 +2,12 @@
 
 import os
 import re
-import csv
 import sys
-import time
-import difflib
 import argparse
 
 from collections import defaultdict
 
-from rich.console import Console
-from rich.style import Style
-from rich.text import Text
-import unicodedata
-import unidecode
-
-console = Console()
-validation_color = Style(color="rgb(153, 230, 76)")  # RGB for lime-ish green
-
-validation_types = {
-	"a": "almost",
-	"b": "bonus",
-	"f": "finished",
-	"n": "no",
-	"p": "previous",
-	"s": "save",
-	"y": "yes",
-	}
+from tool_scripts import roster_matching
 
 reject_words = [
 	"thank",
@@ -49,20 +29,6 @@ emoji_limit = 20
 
 #==============================================================================
 #==============================================================================
-def normalize_name_text(name_text: str) -> str:
-	name_text = re.sub(r":", "", name_text)
-	name_text = name_text.strip()
-	name_text = name_text.lower()
-	name_text = unicodedata.normalize('NFKC', name_text)
-	name_text = unidecode.unidecode(name_text)
-	name_text = re.sub(r"\(.*\)", "", name_text).strip()
-	name_text = re.sub(r"\'s($|\s)", r"\1", name_text).strip()
-	name_text = re.sub(r"\s*(iphone|ipad)\s*", "", name_text)
-	name_text = re.sub(r"[^A-Za-z0-9\- ]", "", name_text)
-	name_text = name_text.strip()
-	return name_text
-
-# =======================
 def checkContent(content: str) -> bool:
 	"""
 	Checks if the content meets the specified criteria.
@@ -145,7 +111,9 @@ def process_line(
 		emoji_counts: dict,
 		content_dict: dict,
 		name_list: set,
-		expanded_student_roster: dict,
+		roster: dict,
+		matcher: roster_matching.RosterMatcher,
+		unmatched_zoom_names: set,
 		) -> None:
 	"""
 	Processes a line of input, updating name counts and content dictionary.
@@ -162,28 +130,31 @@ def process_line(
 	if len(bits) < 3:
 		return
 
-	zoom_name = bits[1].strip().lower()
+	zoom_display_name = bits[1].strip()
+	zoom_name = roster_matching.normalize_name_text(zoom_display_name)
 	# skip the instructor name
 	if zoom_name.startswith("neil voss"):
 		return
-	zoom_name = re.sub(r"\s*iphone\s*", "", zoom_name)
 
-	# Try to match by Zoom username or full name
-	if zoom_name in expanded_student_roster:
-		student = expanded_student_roster[zoom_name]
-	else:
-		# If no exact match, try to find the closest match using find_closest_match
-		matched_name = find_closest_match(zoom_name, expanded_student_roster)
-		if not matched_name:
-			return
-		student = expanded_student_roster[matched_name]
+	student_id, _reason, _score = matcher.match(
+		username="",
+		first_name=zoom_display_name,
+		last_name="",
+		student_id="",
+	)
+	if student_id is None:
+		unmatched_zoom_names.add(zoom_name)
+		return
 
-	# Extract student details
-	first_name = student["first_name"]
-	last_name = student["last_name"]
-	student_id = student["student_id"]
+	student = roster.get(student_id, {})
+	if not student:
+		unmatched_zoom_names.add(zoom_name)
+		return
 
-	name = f"{first_name} {last_name}".lower()
+	name = student.get("full_name", "")
+	if not name:
+		unmatched_zoom_names.add(zoom_name)
+		return
 	name_list.add(name)
 
 	# If this is the first comment by this user, award 1 free point
@@ -259,169 +230,27 @@ def print_results(name_counts: dict, name_list: set, max_num: int) -> None:
 
 
 # =======================
-def find_closest_match(zoom_name: str, student_roster: dict) -> str:
+def load_student_roster(roster_file: str) -> tuple[dict, set, roster_matching.RosterMatcher]:
 	"""
-	Find the closest matching key in the student_roster dictionary and cache it.
-	"""
-	normalized_key = normalize_name_text(zoom_name)
-
-	# First, check if the normalized key is already in the student_roster (cached match)
-	if normalized_key in student_roster:
-		return normalized_key  # Return the cached match
-
-	# Try to find the best match with a high cutoff value
-	best_match = difflib.get_close_matches(
-		normalized_key,
-		student_roster.keys(),  # Using student_roster for matching
-		n=1,
-		cutoff=0.9,  # High confidence cutoff
-		)
-
-	# If no match is found, lower the cutoff value and try again
-	if not best_match:
-		print(f"No automatic match for {normalized_key}")
-		best_match = difflib.get_close_matches(
-			normalized_key,
-			student_roster.keys(),  # Using student_roster for matching
-			n=1,
-			cutoff=0.4,  # Lower confidence cutoff
-			)
-
-		# If still no match, exit the program
-		if not best_match:
-			print(f"{normalized_key} NOT FOUND")
-			print("No matches found at all.")
-			return None
-
-	# At this point, we have a best match but might need user confirmation
-	matched_name = best_match[0]
-	print(f"Closest match found:\nmatch: {matched_name}\ninput: {normalized_key}")
-	validation = get_input_validation("    Is this a good match? (y/n)", "yn")
-
-	if validation == "n":
-		print("Please edit the CSV file and try again.")
-		raise ValueError
-
-	# Cache the approved match in student_roster for future use
-	student_roster[normalized_key] = student_roster[matched_name]
-
-	return matched_name
-
-
-# =======================
-def detect_delimiter(sample_line: str) -> str:
-	"""
-	Detects the most likely delimiter (comma or tab) from a sample line.
-
-	Args:
-	        sample_line (str): A line from the CSV file.
+	Load student roster and create a shared matcher.
 
 	Returns:
-	        str: The detected delimiter (either ',' or '\t').
+		tuple: (roster_by_id, roster_names_set, matcher)
 	"""
-	# Count occurrences of common delimiters
-	if sample_line.count("\t") > sample_line.count(","):
-		return "\t"
-	else:
-		return ","
+	roster_by_id = roster_matching.load_roster(roster_file)
+	roster_names = set()
+	for info in roster_by_id.values():
+		if info.get("full_name", ""):
+			roster_names.add(info["full_name"])
 
-
-# =======================
-def get_input_validation(message: str, valid_letters: str, style: Style = validation_color) -> str:
-	"""
-	Get user input for image validation and ensure it's valid.
-
-	Parameters
-	----------
-	message : str
-	        The custom message that will be displayed to the user when asking for input.
-	valid_letters : str
-	        The string containing all valid input letters.
-	style : Style
-	        The Rich style to apply to the message.
-
-	Returns
-	-------
-	str
-	        The validated user input.
-	"""
-	valid_tuple = tuple(valid_letters)
-	statement = Text(message.strip(), style=style)
-
-	options_text = "-- "
-	for letter in valid_letters:
-		word = validation_types[letter]
-		word = word.replace(letter, "(" + letter + ")")
-		options_text += word + "/"
-	options_text = options_text[:-1] + ": "
-
-	while True:
-		# Use Rich to print the styled part of the statement
-		console.print(statement)
-
-		# Get the user's input
-		validation = input(options_text)
-
-		# Check if the entered input is in the list of valid inputs
-		if validation.lower() in valid_tuple:
-			return validation.lower()
-
-		# Use Rich to print an error message if the entry is invalid
-		console.print("ERROR ~ try again ~\n", style="red")
-
-
-# =======================
-def load_student_roster(roster_file: str) -> dict:
-	"""
-	Load student roster from a CSV file and return a dictionary mapping usernames and full names to student data.
-
-	Args:
-	        roster_file (str): Path to the roster CSV file.
-
-	Returns:
-	        dict: A dictionary mapping usernames and full names to student records.
-	"""
-	student_roster = {}
-	expanded_student_roster = {}
-
-	# Open the file and detect the delimiter from the first line
-	with open(roster_file, "r") as csvfile:
-		# Read the first line to detect the delimiter
-		first_line = csvfile.readline()
-		detected_delimiter = detect_delimiter(first_line)
-
-		# Use the detected delimiter for the DictReader
-		csvfile.seek(0)  # Reset file pointer to the beginning
-		reader = csv.DictReader(csvfile, delimiter=detected_delimiter)
-
-		for row in reader:
-			# Extract the student data
-			first_name = normalize_name_text(row["First Name"])
-			last_name = normalize_name_text(row["Last Name"])
-			username = normalize_name_text(row["Username"])
-			student_id = int(row["Student ID"].strip())
-			alias = normalize_name_text(row["Alias"])
-			full_name = f"{first_name} {last_name}"
-			flipped_full_name = f"{last_name} {first_name}"
-
-			# Store the student data in a dictionary using Username as the key
-			student_roster[full_name] = {
-				"first_name": first_name,
-				"last_name": last_name,
-				"username": username,
-				"student_id": student_id,
-				"alias": alias,
-				}
-
-			# Also map by "First Last" and "Last First" for potential Zoom names
-			expanded_student_roster[full_name] = student_roster[full_name]
-			expanded_student_roster[flipped_full_name] = student_roster[full_name]
-			expanded_student_roster[first_name] = student_roster[full_name]
-			expanded_student_roster[alias] = student_roster[full_name]
-			expanded_student_roster[username] = student_roster[full_name]
-
-	# Return the roster dictionary
-	return student_roster, expanded_student_roster
+	matcher = roster_matching.RosterMatcher(
+		roster=roster_by_id,
+		interactive=True,
+		auto_threshold=0.90,
+		auto_gap=0.06,
+		candidate_count=5,
+	)
+	return roster_by_id, roster_names, matcher
 
 
 # =======================
@@ -452,7 +281,8 @@ if __name__ == "__main__":
 	content_dict = {}
 
 	# Load the student roster
-	student_roster, expanded_student_roster = load_student_roster(args.roster_file)
+	roster_by_id, roster_names, matcher = load_student_roster(args.roster_file)
+	unmatched_zoom_names = set()
 
 	# Read and preprocess lines
 	with open(filename, "r") as fpointer:
@@ -461,16 +291,25 @@ if __name__ == "__main__":
 
 	# Process each combined line, passing the student roster
 	for line in combined_lines:
-		process_line(line, name_counts, emoji_counts, content_dict, name_list, expanded_student_roster)
+		process_line(
+			line,
+			name_counts,
+			emoji_counts,
+			content_dict,
+			name_list,
+			roster_by_id,
+			matcher,
+			unmatched_zoom_names,
+		)
 
 	# =======================
 	# Compare name_list and student_roster.keys()
 
-	# Find names that are in the Zoom chat (name_list) but not in the roster
-	extra_students = name_list - set(student_roster.keys())
+	# Find names that were not matched to the roster
+	extra_students = unmatched_zoom_names
 
 	# Find names that are in the roster but did not participate in the Zoom chat
-	missing_students = set(student_roster.keys()) - name_list
+	missing_students = roster_names - name_list
 
 	# Print the names of students who are not in the roster
 	if extra_students:
@@ -490,7 +329,7 @@ if __name__ == "__main__":
 		print("\nAll students from the roster participated in the discussion.")
 
 	# Merge the name_list (students from chat) with the student_roster keys (all students in the roster)
-	name_list.update(student_roster.keys())
+	name_list.update(roster_names)
 
 	# =======================
 	# Print the results

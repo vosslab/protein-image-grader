@@ -3,104 +3,40 @@
 import re
 import csv
 import math
-import difflib
 import argparse
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-from rich.console import Console
-from rich.style import Style
-from rich.text import Text
+from tool_scripts import roster_matching
 
 # TODO
 # add force option, so you do not have to say yes each time
 # output a score for each student, including those missing
 # sort by first name in output
 
-console = Console()
-validation_color = Style(color="rgb(153, 230, 76)")  # RGB for lime-ish green
-
-validation_types = {
-	"a": "almost",
-	"b": "bonus",
-	"f": "finished",
-	"n": "no",
-	"p": "previous",
-	"s": "save",
-	"y": "yes",
-	}
-
-# =======================
-def detect_delimiter(sample_line: str) -> str:
-	"""
-	Detects the most likely delimiter (comma or tab) from a sample line.
-
-	Args:
-	        sample_line (str): A line from the CSV file.
-
-	Returns:
-	        str: The detected delimiter (either ',' or '\t').
-	"""
-	# Count occurrences of common delimiters
-	if sample_line.count("\t") > sample_line.count(","):
-		return "\t"
-	else:
-		return ","
-
 #==============================================================================
 #==============================================================================
-def load_student_roster(roster_file: str) -> dict:
+def load_student_roster(roster_file: str) -> tuple[dict, set, roster_matching.RosterMatcher]:
 	"""
-	Load student roster from a CSV file and return a dictionary mapping usernames and full names to student data.
-
-	Args:
-	        roster_file (str): Path to the roster CSV file.
+	Load student roster and create a shared matcher.
 
 	Returns:
-	        dict: A dictionary mapping usernames and full names to student records.
+		tuple: (roster_by_id, roster_names_set, matcher)
 	"""
-	student_roster = {}
-	expanded_student_roster = {}
+	roster_by_id = roster_matching.load_roster(roster_file)
+	roster_names = set()
+	for info in roster_by_id.values():
+		if info.get("full_name", ""):
+			roster_names.add(info["full_name"])
 
-	# Open the file and detect the delimiter from the first line
-	with open(roster_file, "r") as csvfile:
-		# Read the first line to detect the delimiter
-		first_line = csvfile.readline()
-		detected_delimiter = detect_delimiter(first_line)
-
-		# Use the detected delimiter for the DictReader
-		csvfile.seek(0)  # Reset file pointer to the beginning
-		reader = csv.DictReader(csvfile, delimiter=detected_delimiter)
-
-		for row in reader:
-			# Extract the student data
-			first_name = normalize_name_text(row["First Name"])
-			last_name = normalize_name_text(row["Last Name"])
-			username = normalize_name_text(row["Username"])
-			student_id = int(row["Student ID"].strip())
-			alias = normalize_name_text(row["Alias"])
-			full_name = f"{first_name} {last_name}"
-			flipped_full_name = f"{last_name} {first_name}"
-
-			# Store the student data in a dictionary using Username as the key
-			student_roster[full_name] = {
-				"first_name": first_name,
-				"last_name": last_name,
-				"username": username,
-				"student_id": student_id,
-				"alias": alias,
-				'full name': full_name,
-				}
-
-			# Also map by "First Last" and "Last First" for potential Zoom names
-			expanded_student_roster[full_name] = student_roster[full_name]
-			expanded_student_roster[flipped_full_name] = student_roster[full_name]
-			expanded_student_roster[first_name] = student_roster[full_name]
-			expanded_student_roster[alias] = student_roster[full_name]
-			expanded_student_roster[username] = student_roster[full_name]
-
-	# Return the roster dictionary
-	return student_roster, expanded_student_roster
+	matcher = roster_matching.RosterMatcher(
+		roster=roster_by_id,
+		interactive=True,
+		auto_threshold=0.90,
+		auto_gap=0.06,
+		candidate_count=5,
+	)
+	return roster_by_id, roster_names, matcher
 
 #==============================================================================
 #==============================================================================
@@ -114,7 +50,7 @@ def determine_meeting_start_time(participants):
 
 #==============================================================================
 #==============================================================================
-def categorize_participants(participants, meeting_start_time, student_roster):
+def categorize_participants(participants, meeting_start_time, roster_names):
 	"""
 	Categorizes students based on their join times relative to the meeting start and ensures all students
 	are included in the output, even those who did not participate.
@@ -122,7 +58,7 @@ def categorize_participants(participants, meeting_start_time, student_roster):
 	Args:
 		participants (dict): Attendance data for students who joined.
 		meeting_start_time (datetime): The official meeting start time.
-		student_roster (dict): The full student roster.
+		roster_names (set): The full set of student names from the roster.
 
 	Returns:
 		list: Processed student attendance records.
@@ -131,7 +67,7 @@ def categorize_participants(participants, meeting_start_time, student_roster):
 	processed_student_tree = []
 	bulk_leave_times = []
 	# Ensure every student in the roster is processed
-	for student_name in student_roster.keys():
+	for student_name in sorted(roster_names):
 		if student_name in participants:
 			# If the student has participant data, process their attendance
 			sessions = participants[student_name]
@@ -280,97 +216,9 @@ def write_output(processed_data, output_file):
 
 #==============================================================================
 #==============================================================================
-def normalize_name_text(name_text: str) -> str:
-	name_text = name_text.strip()
-	name_text = name_text.lower()
-	name_text = re.sub(r"\s*iphone\s*", "", name_text)
-	name_text = re.sub(r"[^A-Za-z0-9\- ]", "", name_text)
-	return name_text
-
 #==============================================================================
 #==============================================================================
-def find_closest_match(zoom_name: str, student_roster: dict) -> str:
-	"""
-	Find the closest matching key in the student_roster dictionary and cache it.
-	"""
-	normalized_key = normalize_name_text(zoom_name)
-
-	# First, check if the normalized key is already in the student_roster (cached match)
-	if normalized_key in student_roster:
-		return normalized_key  # Return the cached match
-
-	# Try to find the best match with a high cutoff value
-	best_match = difflib.get_close_matches(
-		normalized_key,
-		student_roster.keys(),  # Using student_roster for matching
-		n=1,
-		cutoff=0.9,  # High confidence cutoff
-		)
-
-	# If no match is found, lower the cutoff value and try again
-	if not best_match:
-		print(f"No automatic match for {normalized_key}")
-		best_match = difflib.get_close_matches(
-			normalized_key,
-			student_roster.keys(),  # Using student_roster for matching
-			n=1,
-			cutoff=0.4,  # Lower confidence cutoff
-			)
-
-		# If still no match, exit the program
-		if not best_match:
-			print(f"{normalized_key} NOT FOUND")
-			print("No matches found at all.")
-			return None
-
-	# At this point, we have a best match but might need user confirmation
-	matched_name = best_match[0]
-	print(f"Closest match found:\nfound: {matched_name}\n zoom: {normalized_key}")
-	validation = get_input_validation("    Is this a good match? (y/n)", "yn")
-
-	if validation == "n":
-		print("Please edit the CSV file and try again.")
-		raise ValueError
-
-	# Cache the approved match in student_roster for future use
-	student_roster[normalized_key] = student_roster[matched_name]
-
-	return matched_name
-
-
-# =======================
-def get_input_validation(message: str, valid_letters: str, style: Style = validation_color) -> str:
-	"""
-	Get user input for image validation and ensure it's valid.
-	"""
-	valid_tuple = tuple(valid_letters)
-	statement = Text(message.strip(), style=style)
-
-	options_text = "-- "
-	for letter in valid_letters:
-		word = validation_types[letter]
-		word = word.replace(letter, "(" + letter + ")")
-		options_text += word + "/"
-	options_text = options_text[:-1] + ": "
-
-	while True:
-		# Use Rich to print the styled part of the statement
-		console.print(statement)
-
-		# Get the user's input
-		validation = input(options_text)
-
-		# Check if the entered input is in the list of valid inputs
-		if validation.lower() in valid_tuple:
-			return validation.lower()
-
-		# Use Rich to print an error message if the entry is invalid
-		console.print("ERROR ~ try again ~\n", style="red")
-
-
-#==============================================================================
-#==============================================================================
-def process_zoom_attendance(input_file, expanded_student_roster):
+def process_zoom_attendance(input_file, roster_by_id, matcher):
 	participants = defaultdict(list)
 
 	# Open the file with utf-8-sig to handle BOM
@@ -383,22 +231,25 @@ def process_zoom_attendance(input_file, expanded_student_roster):
 		row_count = 0
 		for row in reader:
 			row_count += 1
-			zoom_name = row['Name (original name)']
-			normalized_name = normalize_name_text(zoom_name)
+			zoom_name = row['Name (original name)'].strip()
+			normalized_name = roster_matching.normalize_name_text(zoom_name)
 			if normalized_name.startswith("neil voss"):
 				continue
-			# Try to match by Zoom username or full name
-			if normalized_name in expanded_student_roster:
-				student_dict = expanded_student_roster[normalized_name]
-			else:
-				# If no exact match, try to find the closest match using find_closest_match
-				matched_name = find_closest_match(normalized_name, expanded_student_roster)
-				if not matched_name:
-					continue
-				student_dict = expanded_student_roster[matched_name]
-			student_name = student_dict['full name']
+			email = (row.get('Email', '') or '').strip()
+			student_id, _reason, _score = matcher.match(
+				username=email,
+				first_name=zoom_name,
+				last_name="",
+				student_id="",
+			)
+			if student_id is None:
+				continue
+			student_dict = roster_by_id.get(student_id, {})
+			student_name = student_dict.get('full_name', '')
+			if not student_name:
+				continue
 
-			email = row['Email'].strip() if row['Email'] else "No Email"
+			email = email if email else "No Email"
 			join_time = datetime.strptime(row['Join time'].strip(), "%Y-%m-%d %I:%M:%S %p")
 			leave_time = datetime.strptime(row['Leave time'].strip(), "%Y-%m-%d %I:%M:%S %p")
 			duration = int(row['Duration (minutes)'].strip())
@@ -454,24 +305,6 @@ def print_final_scores(processed_student_tree):
 
 #==============================================================================
 #==============================================================================
-def print_final_scores(processed_student_tree):
-	"""
-	Prints the final scores sorted by student name, without printing names.
-	Missing students will have a hyphen ('-') instead of a numerical score.
-
-	Args:
-		processed_student_tree (list): List of student attendance records.
-	"""
-	# Sort records by Name (alphabetically)
-	sorted_records = sorted(processed_student_tree, key=lambda x: x["Name"])
-
-	# Print only the final scores (excluding names)
-	for record in sorted_records:
-		print(record["Final Score"])  # Outputs only the score (or '-')
-
-
-#==============================================================================
-#==============================================================================
 #==============================================================================
 #==============================================================================
 def main():
@@ -489,14 +322,14 @@ def main():
 	"""
 	args = parse_arguments()
 	# Load the student roster
-	student_roster, expanded_student_roster = load_student_roster(args.roster_file)
+	roster_by_id, roster_names, matcher = load_student_roster(args.roster_file)
 
 	# Process attendance data
-	participants = process_zoom_attendance(args.input_file, expanded_student_roster)
+	participants = process_zoom_attendance(args.input_file, roster_by_id, matcher)
 	print("\n\n")
 
 	meeting_start_time = determine_meeting_start_time(participants)
-	processed_student_tree, bulk_leave_times = categorize_participants(participants, meeting_start_time, student_roster)
+	processed_student_tree, bulk_leave_times = categorize_participants(participants, meeting_start_time, roster_names)
 
 	# Mark end-of-session attendance and calculate total time
 	mark_stayed_until_end(processed_student_tree, bulk_leave_times, meeting_start_time)

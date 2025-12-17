@@ -10,6 +10,9 @@ import re
 # PIP3 modules
 import yaml
 
+# local modules
+from tool_scripts import roster_matching
+
 
 #============================================
 def parse_args() -> argparse.Namespace:
@@ -42,11 +45,15 @@ def parse_args() -> argparse.Namespace:
 		"-o", "--output", dest="scores_csv", default="generic_movie_scores.csv",
 		help="Output CSV with per-student scores"
 	)
+	io_group.add_argument(
+		"-u", "--unmatched", dest="unmatched_csv", default="unmatched_students.csv",
+		help="Output CSV listing submissions that could not be matched to the roster"
+	)
 
 	match_group = parser.add_argument_group("Movie matching")
 	match_group.add_argument(
 		"-t", "--threshold", dest="match_threshold", type=float, default=0.30,
-		help="Max normalized Levenshtein distance for auto-matching movie titles"
+		help="Max match score for auto-matching movie titles (title distance + small year penalty)"
 	)
 	match_group.add_argument(
 		"-y", "--interactive", dest="interactive", action="store_true",
@@ -54,9 +61,32 @@ def parse_args() -> argparse.Namespace:
 	)
 	match_group.add_argument(
 		"-Y", "--no-interactive", dest="interactive", action="store_false",
-		help="Do not prompt (default)"
+		help="Do not prompt"
 	)
-	parser.set_defaults(interactive=False)
+	parser.set_defaults(interactive=True)
+
+	student_group = parser.add_argument_group("Student matching")
+	student_group.add_argument(
+		"--require-student-match", dest="require_student_match", action="store_true",
+		help="Require every submission to match a roster student",
+	)
+	student_group.add_argument(
+		"--allow-unmatched-students", dest="require_student_match", action="store_false",
+		help="Allow submissions that do not match the roster (default)",
+	)
+	student_group.add_argument(
+		"-T", "--student-threshold", dest="student_threshold", type=float, default=0.88,
+		help="Auto-accept similarity threshold for student matching (0 to 1)"
+	)
+	student_group.add_argument(
+		"-G", "--student-gap", dest="student_gap", type=float, default=0.06,
+		help="Auto-accept requires top score exceed runner-up by this gap"
+	)
+	student_group.add_argument(
+		"-C", "--student-candidates", dest="student_candidates", type=int, default=5,
+		help="Candidates to show in interactive student matching"
+	)
+	parser.set_defaults(require_student_match=False)
 
 	grade_group = parser.add_argument_group("Grading")
 	grade_group.add_argument(
@@ -73,23 +103,44 @@ def parse_args() -> argparse.Namespace:
 
 
 #============================================
-def read_roster(roster_csv: str) -> dict:
-	"""Read roster CSV into a dict keyed by student_id (int)."""
-	roster: dict = {}
-	with open(roster_csv, "r", encoding="utf-8-sig", newline="") as f:
-		reader = csv.DictReader(f)
-		for row in reader:
-			student_id_text = (row.get("Student ID") or row.get("StudentID") or "").strip()
-			if not student_id_text:
-				continue
-			student_id = int(student_id_text)
-			roster[student_id] = {
-				"First Name": (row.get("First Name") or row.get("First") or "").strip().title(),
-				"Last Name": (row.get("Last Name") or row.get("Last") or "").strip().title(),
-				"Username": (row.get("Username") or "").strip(),
-				"Student ID": student_id,
-			}
-	return roster
+def ansi_wrap(text: str, code: str) -> str:
+	"""Wrap text with an ANSI color code."""
+	return f"\033[{code}m{text}\033[0m"
+
+
+#============================================
+def print_section(title: str, code: str = "96") -> None:
+	"""Print a colored section header."""
+	bar = "=" * 70
+	print("")
+	print(ansi_wrap(bar, code))
+	print(ansi_wrap(title.strip(), code))
+	print(ansi_wrap(bar, code))
+
+
+#============================================
+def write_unmatched_csv(path: str, records: list[dict]) -> None:
+	"""Write unmatched submission info to CSV."""
+	if not path:
+		return
+	if not records:
+		return
+
+	fields = [
+		"Timestamp",
+		"Movie Key",
+		"Submitted Username",
+		"Submitted First Name",
+		"Submitted Last Name",
+		"Submitted RUID",
+		"Reason",
+		"Score",
+	]
+	with open(path, "w", encoding="utf-8", newline="") as f:
+		writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+		writer.writeheader()
+		for rec in records:
+			writer.writerow(rec)
 
 
 #============================================
@@ -155,6 +206,21 @@ def clean_movie_name(movie_name_text: str) -> str:
 
 
 #============================================
+def normalize_movie_title_for_matching(movie_name_text: str) -> str:
+	"""Normalize movie titles for fuzzy matching (more tolerant than clean_movie_name)."""
+	text = clean_movie_name(movie_name_text)
+
+	# Common leading phrasing
+	text = re.sub(r"^I Watched ", "", text, flags=re.IGNORECASE)
+	text = re.sub(r"^Watched ", "", text, flags=re.IGNORECASE)
+
+	# Remove standalone years embedded in the title text
+	text = re.sub(r"\b(19|20)[0-9]{2}\b", " ", text)
+	text = re.sub(r"\s+", " ", text).strip()
+	return text
+
+
+#============================================
 def parse_year(movie_year_text: str) -> int:
 	"""Parse a year that may include extra characters."""
 	text = movie_year_text.strip()
@@ -216,7 +282,7 @@ def load_movies_yaml(movies_yaml: str) -> dict:
 		title = str(entry["title"]).strip()
 		abbrev = str(entry["abbrev"]).strip()
 		due = str(entry["due"]).strip()
-		bb_grade_field = str(entry.get("bb_grade_field", "")).strip()
+		bb_grade_field = str(entry.get("gradebook_field", "") or entry.get("bb_grade_field", "")).strip()
 		aliases = entry.get("aliases", [])
 		if aliases is None:
 			aliases = []
@@ -320,39 +386,54 @@ def match_movie_key(
 	interactive: bool,
 ) -> str | None:
 	"""Match a free-text movie title and year to a canonical movie key."""
-	clean_name = clean_movie_name(movie_name)
+	clean_name = normalize_movie_title_for_matching(movie_name)
 	key_guess = f"{movie_year:04d} - {clean_name}"
 
 	best_key: str | None = None
-	best_dist = 999.0
-	for canonical_key, info in movies.items():
-		if info["year"] != movie_year:
-			continue
-		d = normalized_distance(key_guess, canonical_key)
-		if d < best_dist:
-			best_dist = d
-			best_key = canonical_key
-			continue
+	best_score = 999.0
+	best_title_dist = 999.0
+	best_year_delta = 999
 
-		for alias in info.get("aliases", []):
-			alias_key = f"{movie_year:04d} - {alias}"
-			d_alias = normalized_distance(key_guess, alias_key)
-			if d_alias < best_dist:
-				best_dist = d_alias
+	for canonical_key, info in movies.items():
+		candidate_year = int(info["year"])
+		year_delta = abs(int(movie_year) - candidate_year)
+		year_penalty = min(year_delta / 5.0, 1.0)
+
+		candidate_titles = [info.get("title", "")]
+		candidate_titles += list(info.get("aliases", []))
+		for cand in candidate_titles:
+			cand_clean = normalize_movie_title_for_matching(str(cand))
+
+			if not cand_clean:
+				continue
+
+			if clean_name == cand_clean or clean_name in cand_clean or cand_clean in clean_name:
+				title_dist = 0.0
+			else:
+				title_dist = normalized_distance(clean_name, cand_clean)
+
+			score = float(title_dist) + (0.10 * float(year_penalty))
+			if score < best_score:
+				best_score = score
 				best_key = canonical_key
+				best_title_dist = float(title_dist)
+				best_year_delta = int(year_delta)
 
 	if best_key is None:
 		return None
 
-	if best_dist <= match_threshold:
+	if best_score <= match_threshold:
 		return best_key
 
 	if not interactive:
 		return None
 
 	print("")
-	print(f"Uncertain match: '{key_guess}'")
-	print(f"Best guess: '{best_key}' (distance {best_dist:.5f})")
+	print(ansi_wrap(f"Uncertain match: '{key_guess}'", "93"))
+	print(ansi_wrap(f"Best guess: '{best_key}' (score {best_score:.5f})", "96"))
+	if best_year_delta > 0:
+		best_year = int(movies[best_key]["year"])
+		print(ansi_wrap(f"NOTE: year mismatch (input {movie_year} vs movie {best_year})", "91"))
 	value = input("Approve? 1 = yes; 0 = no: ").strip()
 	if value == "1":
 		return best_key
@@ -404,6 +485,76 @@ def group_rows_by_movie(
 
 
 #============================================
+def add_student_match_columns(header: list, short_header: list) -> tuple[list, list]:
+	"""Append roster-match columns to both headers."""
+	out_header = roster_matching.append_match_columns(header)
+	out_short = roster_matching.append_match_columns(short_header)
+	return out_header, out_short
+
+
+#============================================
+def match_students_for_rows(
+	rows: list,
+	short_header: list,
+	matcher: roster_matching.RosterMatcher,
+) -> list:
+	"""Match students for all rows and append match columns to each row."""
+	username_index = roster_matching.find_column_ci(short_header, "Username")
+
+	first_name_index = None
+	for name in ["first name", "First Name"]:
+		idx = roster_matching.find_column_ci(short_header, name)
+		if idx is not None:
+			first_name_index = idx
+			break
+
+	last_name_index = None
+	for name in ["last name", "Last Name"]:
+		idx = roster_matching.find_column_ci(short_header, name)
+		if idx is not None:
+			last_name_index = idx
+			break
+
+	ruid_index = None
+	for name in ["RUID", "RU ID", "RU Id", "Student ID", "StudentID"]:
+		idx = roster_matching.find_column_ci(short_header, name)
+		if idx is not None:
+			ruid_index = idx
+			break
+	if ruid_index is None and len(short_header) > 4:
+		ruid_index = 4
+
+	updated_rows = []
+	for row in rows:
+		sub_username = row[username_index] if username_index is not None else ""
+		sub_first = row[first_name_index] if first_name_index is not None else ""
+		sub_last = row[last_name_index] if last_name_index is not None else ""
+		sub_ruid = row[ruid_index] if ruid_index is not None and ruid_index < len(row) else ""
+
+		student_id, reason, score = matcher.match(
+			username=sub_username,
+			first_name=sub_first,
+			last_name=sub_last,
+			student_id=sub_ruid,
+		)
+
+		out_row = list(row)
+		if student_id is None:
+			out_row += ["", "", "", reason, f"{score:.3f}"]
+		else:
+			ro = matcher.roster.get(int(student_id), {})
+			out_row += [
+				str(student_id),
+				ro.get("username", ""),
+				ro.get("full_name", ""),
+				reason,
+				f"{score:.3f}",
+			]
+		updated_rows.append(out_row)
+	return updated_rows
+
+
+#============================================
 def compute_movie_grades(
 	movie_key: str,
 	rows: list,
@@ -411,13 +562,82 @@ def compute_movie_grades(
 	movie_info: dict,
 	question_codes: list[str],
 	max_score: float,
+	unmatched_records: list[dict],
 ) -> dict[int, dict]:
 	"""Compute grades for one movie and return per-student score dicts."""
 
-	student_id_index = short_header.index("RU ID") if "RU ID" in short_header else 4
 	submit_time_index = 0
+	match_id_index = roster_matching.find_column_ci(short_header, "Matched Student ID")
+	match_reason_index = roster_matching.find_column_ci(short_header, "Match Reason")
+	match_score_index = roster_matching.find_column_ci(short_header, "Match Score")
 
-	unique_rows = pick_latest_submission(rows, student_id_index=student_id_index, submit_time_index=submit_time_index)
+	username_index = None
+	first_name_index = None
+	last_name_index = None
+	ruid_index = None
+	for name in ["Username"]:
+		idx = roster_matching.find_column_ci(short_header, name)
+		if idx is not None:
+			username_index = idx
+			break
+	for name in ["first name", "First Name"]:
+		idx = roster_matching.find_column_ci(short_header, name)
+		if idx is not None:
+			first_name_index = idx
+			break
+	for name in ["last name", "Last Name"]:
+		idx = roster_matching.find_column_ci(short_header, name)
+		if idx is not None:
+			last_name_index = idx
+			break
+	for name in ["RUID", "RU ID", "RU Id", "Student ID", "StudentID"]:
+		idx = roster_matching.find_column_ci(short_header, name)
+		if idx is not None:
+			ruid_index = idx
+			break
+	if ruid_index is None and len(short_header) > 4:
+		ruid_index = 4
+
+	matched_rows: list[tuple[int, datetime.datetime, list]] = []
+	for row in rows:
+		try:
+			submit_dt = parse_time(row[submit_time_index])
+		except ValueError:
+			continue
+
+		sub_username = row[username_index] if username_index is not None else ""
+		sub_first = row[first_name_index] if first_name_index is not None else ""
+		sub_last = row[last_name_index] if last_name_index is not None else ""
+		sub_ruid = row[ruid_index] if ruid_index is not None and ruid_index < len(row) else ""
+
+		student_id_text = row[match_id_index] if match_id_index is not None and match_id_index < len(row) else ""
+		student_id = roster_matching.safe_int(student_id_text)
+		if student_id is None:
+			reason = row[match_reason_index] if match_reason_index is not None and match_reason_index < len(row) else ""
+			score = row[match_score_index] if match_score_index is not None and match_score_index < len(row) else ""
+			unmatched_records.append(
+				{
+					"Timestamp": row[submit_time_index],
+					"Movie Key": movie_key,
+					"Submitted Username": sub_username,
+					"Submitted First Name": sub_first,
+					"Submitted Last Name": sub_last,
+					"Submitted RUID": sub_ruid,
+					"Reason": reason,
+					"Score": score,
+				}
+			)
+			continue
+		matched_rows.append((int(student_id), submit_dt, row))
+
+	latest: dict[int, tuple[datetime.datetime, list]] = {}
+	for student_id, submit_dt, row in matched_rows:
+		current = latest.get(student_id)
+		if current is None or submit_dt > current[0]:
+			latest[student_id] = (submit_dt, row)
+	unique_pairs: list[tuple[int, list]] = []
+	for student_id, pair in latest.items():
+		unique_pairs.append((student_id, pair[1]))
 
 	due_time = parse_time(movie_info["due"])
 	abbrev = movie_info["abbrev"]
@@ -427,8 +647,7 @@ def compute_movie_grades(
 	read_scores: list[float] = []
 	metrics_by_student: dict[int, dict] = {}
 
-	for row in unique_rows:
-		student_id = int(row[student_id_index].strip())
+	for student_id, row in unique_pairs:
 		submit_time = parse_time(row[submit_time_index])
 		all_text = ""
 		total_words = 0
@@ -444,7 +663,7 @@ def compute_movie_grades(
 		read_score = coleman_liau_index(all_text)
 		days_late = max((submit_time - due_time).total_seconds(), 0.0) / (24.0 * 3600.0)
 
-		metrics_by_student[student_id] = {
+		metrics_by_student[int(student_id)] = {
 			abbrev + "Word Count": total_words,
 			abbrev + "Coleman-Liau": round(read_score, 1),
 			abbrev + "Days Late": round(days_late, 2),
@@ -482,7 +701,7 @@ def compute_movie_grades(
 		movie_grade_dict[abbrev + "GRADE"] = final_grade
 		if bb_grade_field:
 			movie_grade_dict[bb_grade_field] = round(final_grade, 1)
-		results[student_id] = movie_grade_dict
+		results[int(student_id)] = movie_grade_dict
 
 	return results
 
@@ -496,7 +715,15 @@ def merge_student_records(
 	merged: dict[int, dict] = {}
 
 	for student_id, roster_row in roster.items():
-		merged[student_id] = dict(roster_row)
+		first_name = roster_row.get("first_name", "").strip().title()
+		last_name = roster_row.get("last_name", "").strip().title()
+		username = roster_row.get("username", "").strip()
+		merged[int(student_id)] = {
+			"First Name": first_name,
+			"Last Name": last_name,
+			"Username": username,
+			"Student ID": int(student_id),
+		}
 
 	for movie_result in per_movie_results:
 		for student_id, movie_dict in movie_result.items():
@@ -551,12 +778,26 @@ def main() -> None:
 	if not os.path.isfile(args.movies_yaml):
 		raise FileNotFoundError(args.movies_yaml)
 
-	roster = read_roster(args.roster_csv)
+	roster = roster_matching.load_roster(args.roster_csv)
+	matcher = roster_matching.RosterMatcher(
+		roster=roster,
+		interactive=args.interactive,
+		require_match=args.require_student_match,
+		auto_threshold=args.student_threshold,
+		auto_gap=args.student_gap,
+		candidate_count=args.student_candidates,
+	)
+	unmatched_records: list[dict] = []
 	rows, header = read_form_csv(args.input_csv)
 	short_header = make_short_header(header)
 	movies = load_movies_yaml(args.movies_yaml)
 	question_codes = [q.strip() for q in args.question_codes.split(",") if q.strip()]
 
+	print_section("ROSTER MATCHING", "96")
+	header, short_header = add_student_match_columns(header, short_header)
+	rows = match_students_for_rows(rows, short_header, matcher)
+
+	print_section("MOVIE MATCHING", "95")
 	groups, updated_rows = group_rows_by_movie(
 		rows=rows,
 		short_header=short_header,
@@ -569,6 +810,7 @@ def main() -> None:
 	per_movie_results: list[dict[int, dict]] = []
 	for movie_key in sorted(groups.keys()):
 		movie_info = movies[movie_key]
+		print(ansi_wrap(f"Grading movie: {movie_key}", "92"))
 		result = compute_movie_grades(
 			movie_key=movie_key,
 			rows=groups[movie_key],
@@ -576,11 +818,13 @@ def main() -> None:
 			movie_info=movie_info,
 			question_codes=question_codes,
 			max_score=args.max_score,
+			unmatched_records=unmatched_records,
 		)
 		per_movie_results.append(result)
 
 	records = merge_student_records(roster, per_movie_results)
 	write_scores_csv(args.scores_csv, records)
+	write_unmatched_csv(args.unmatched_csv, unmatched_records)
 
 
 #============================================
