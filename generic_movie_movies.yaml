@@ -1,0 +1,80 @@
+movies:
+  - year: 2020
+    title: "American Experience: The Poison Squad"
+    abbrev: "AE_Poison_"
+    due: "2025/11/06 11:59:59 PM"
+    gradebook_field: "Poison Squad Movie Form"
+    aliases:
+      - "The Poison Squad"
+      - "American Experience s32e02"
+
+  - year: 1997
+    title: "GATTACA"
+    abbrev: "GATTACA_"
+    due: "2025/12/02 11:59:59 PM"
+    gradebook_field: "GATTACA Movie Form"
+
+  - year: 1993
+    title: "MST3K s05e17"
+    abbrev: "MST3K_"
+    due: "2024/06/04 11:59:59 PM"
+    gradebook_field: "Class 01 Generic Movie Form [Total Pts: 5 Score] |944838"
+    aliases:
+      - "Beginning of the End"
+      - "MST3K s05e17"
+
+  - year: 2013
+    title: "Her"
+    abbrev: "Her_"
+    due: "2024/06/06 11:59:59 PM"
+    gradebook_field: "Class 02 Generic Movie Form [Total Pts: 5 Score] |944839"
+
+  - year: 2004
+    title: "Shaun of the Dead"
+    abbrev: "Shaun_of_the_Dead_"
+    due: "2024/06/11 11:59:59 PM"
+    gradebook_field: "Class 03 Generic Movie Form [Total Pts: 5 Score] |944840"
+
+  - year: 2022
+    title: "Don't Look Up"
+    abbrev: "Dont_Look_Up_"
+    due: "2024/06/13 11:59:59 PM"
+    gradebook_field: "Class 04 Generic Movie Form [Total Pts: 5 Score] |944841"
+    aliases:
+      - "Dont Look Up"
+
+  - year: 2007
+    title: "Into the Wild"
+    abbrev: "Into_the_Wild_"
+    due: "2024/06/18 11:59:59 PM"
+    gradebook_field: "Class 05 Generic Movie Form [Total Pts: 5 Score] |944842"
+
+  - year: 2016
+    title: "Arrival"
+    abbrev: "Arrival_"
+    due: "2024/06/20 11:59:59 PM"
+    gradebook_field: "Class 06 Generic Movie Form [Total Pts: 5 Score] |944843"
+
+  - year: 1990
+    title: "Total Recall"
+    abbrev: "Total_Recall_"
+    due: "2024/06/25 11:59:59 PM"
+    gradebook_field: "Class 07 Generic Movie Form [Total Pts: 5 Score] |944844"
+
+  - year: 2018
+    title: "Annihilation"
+    abbrev: "Annihilation_"
+    due: "2024/06/27 11:59:59 PM"
+    gradebook_field: "Class 08 Generic Movie Form [Total Pts: 5 Score] |945084"
+
+  - year: 2009
+    title: "Moon"
+    abbrev: "Moon_"
+    due: "2024/07/01 11:59:59 PM"
+    gradebook_field: "Class 09 Generic Movie Form [Total Pts: 5 Score] |945085"
+
+  - year: 2023
+    title: "Totally Killer"
+    abbrev: "Totally_Killer_"
+    due: "2024/07/01 11:59:59 PM"
+    gradebook_field: "Class 10 Generic Movie Form [Total Pts: 5 Score] |945086"
