@@ -12,6 +12,22 @@ import unicodedata
 import unidecode
 
 
+__all__ = [
+	"RosterMatcher",
+	"append_match_columns",
+	"build_roster_indexes",
+	"detect_delimiter",
+	"find_column_ci",
+	"load_roster",
+	"match_rows_to_roster",
+	"match_submission",
+	"normalize_name_text",
+	"normalize_username",
+	"read_roster",
+	"safe_int",
+]
+
+
 #============================================
 def parse_args() -> argparse.Namespace:
 	"""Parse command-line arguments."""
@@ -177,6 +193,16 @@ def read_roster(roster_csv: str) -> dict[int, dict]:
 
 
 #============================================
+def load_roster(roster_csv: str) -> dict[int, dict]:
+	"""Load a roster CSV.
+
+	This is an import-friendly alias for read_roster.
+	"""
+	roster = read_roster(roster_csv)
+	return roster
+
+
+#============================================
 def build_roster_indexes(roster: dict[int, dict]) -> dict:
 	"""Build lookup tables for fast matching."""
 	by_username: dict[str, int] = {}
@@ -209,6 +235,144 @@ def build_roster_indexes(roster: dict[int, dict]) -> dict:
 		"by_username": by_username,
 		"by_name": by_name,
 	}
+
+
+#============================================
+class RosterMatcher:
+	"""Match submission identity fields to a roster.
+
+	This is the main import-friendly API.
+	"""
+
+	def __init__(
+		self,
+		roster: dict[int, dict],
+		interactive: bool = False,
+		auto_threshold: float = 0.88,
+		auto_gap: float = 0.06,
+		candidate_count: int = 5,
+	) -> None:
+		self.roster = roster
+		self.indexes = build_roster_indexes(roster)
+		self.interactive = interactive
+		self.auto_threshold = auto_threshold
+		self.auto_gap = auto_gap
+		self.candidate_count = candidate_count
+		self.cache: dict[str, tuple[int | None, str, float]] = {}
+
+	#============================================
+	def match(
+		self,
+		username: str,
+		first_name: str,
+		last_name: str,
+		student_id: str,
+	) -> tuple[int | None, str, float]:
+		"""Match one submission record.
+
+		Returns (student_id or None, reason, score).
+		"""
+		cache_key = (
+			f"{safe_int(student_id) or ''}|" +
+			f"{normalize_username(username)}|" +
+			f"{normalize_name_text(first_name)} {normalize_name_text(last_name)}"
+		).strip()
+		cached = self.cache.get(cache_key)
+		if cached is not None:
+			return cached
+
+		sub = {
+			"username": username,
+			"first_name": first_name,
+			"last_name": last_name,
+			"student_id": student_id,
+		}
+		result = match_submission(
+			sub=sub,
+			roster=self.roster,
+			indexes=self.indexes,
+			interactive=self.interactive,
+			auto_threshold=self.auto_threshold,
+			auto_gap=self.auto_gap,
+			candidate_count=self.candidate_count,
+		)
+		self.cache[cache_key] = result
+		return result
+
+
+#============================================
+def append_match_columns(header: list[str]) -> list[str]:
+	"""Return an output header with match columns appended."""
+	out_header = list(header)
+	out_header += [
+		"Matched Student ID",
+		"Matched Username",
+		"Matched Full Name",
+		"Match Reason",
+		"Match Score",
+	]
+	return out_header
+
+
+#============================================
+def match_rows_to_roster(
+		rows: list[list[str]],
+		header: list[str],
+		matcher: RosterMatcher,
+		col_username: str = "Username",
+		col_first: str = "Enter your first name",
+		col_last: str = "Enter your last name",
+		col_student_id: str = "Enter your RUID",
+	) -> tuple[list[str], list[list[str]], dict]:
+	"""Match many rows and return (out_header, out_rows, summary)."""
+	idx_user = find_column_ci(header, col_username)
+	idx_first = find_column_ci(header, col_first)
+	idx_last = find_column_ci(header, col_last)
+	idx_id = find_column_ci(header, col_student_id)
+
+	if idx_user is None and idx_first is None and idx_last is None and idx_id is None:
+		raise ValueError("Could not find any requested submission columns in the input header")
+
+	out_header = append_match_columns(header)
+
+	matched = 0
+	unmatched = 0
+	out_rows: list[list[str]] = []
+	for row in rows:
+		username = row[idx_user] if idx_user is not None and idx_user < len(row) else ""
+		first_name = row[idx_first] if idx_first is not None and idx_first < len(row) else ""
+		last_name = row[idx_last] if idx_last is not None and idx_last < len(row) else ""
+		student_id = row[idx_id] if idx_id is not None and idx_id < len(row) else ""
+
+		student_id_value, reason, score = matcher.match(
+			username=username,
+			first_name=first_name,
+			last_name=last_name,
+			student_id=student_id,
+		)
+
+		out_row = list(row)
+		if student_id_value is None:
+			unmatched += 1
+			out_row += ["", "", "", reason, f"{score:.3f}"]
+		else:
+			matched += 1
+			ro = matcher.roster.get(student_id_value, {})
+			out_row += [
+				str(student_id_value),
+				ro.get("username", ""),
+				ro.get("full_name", ""),
+				reason,
+				f"{score:.3f}",
+			]
+		out_rows.append(out_row)
+
+	summary = {
+		"matched": matched,
+		"unmatched": unmatched,
+		"total": matched + unmatched,
+	}
+	return out_header, out_rows, summary
 
 
 #============================================
@@ -374,60 +538,28 @@ def main() -> None:
 	if not os.path.isfile(args.input_csv):
 		raise FileNotFoundError(args.input_csv)
 
-	roster = read_roster(args.roster_csv)
-	indexes = build_roster_indexes(roster)
+	roster = load_roster(args.roster_csv)
+	matcher = RosterMatcher(
+		roster=roster,
+		interactive=args.interactive,
+		auto_threshold=args.auto_threshold,
+		auto_gap=args.auto_gap,
+		candidate_count=args.candidate_count,
+	)
 	rows, header, delimiter = read_submission_rows(args.input_csv)
 
-	idx_user = find_column_ci(header, args.col_username)
-	idx_first = find_column_ci(header, args.col_first)
-	idx_last = find_column_ci(header, args.col_last)
-	idx_id = find_column_ci(header, args.col_student_id)
+	out_header, out_rows, summary = match_rows_to_roster(
+		rows=rows,
+		header=header,
+		matcher=matcher,
+		col_username=args.col_username,
+		col_first=args.col_first,
+		col_last=args.col_last,
+		col_student_id=args.col_student_id,
+	)
 
-	if idx_user is None and idx_first is None and idx_last is None and idx_id is None:
-		raise ValueError("Could not find any requested submission columns in the input file")
-
-	out_header = list(header)
-	out_header += ["Matched Student ID", "Matched Username", "Matched Full Name", "Match Reason", "Match Score"]
-
-	matched = 0
-	unmatched = 0
-	out_rows: list[list[str]] = []
-	for row in rows:
-		sub = {
-			"username": row[idx_user] if idx_user is not None and idx_user < len(row) else "",
-			"first_name": row[idx_first] if idx_first is not None and idx_first < len(row) else "",
-			"last_name": row[idx_last] if idx_last is not None and idx_last < len(row) else "",
-			"student_id": row[idx_id] if idx_id is not None and idx_id < len(row) else "",
-		}
-
-		student_id, reason, score = match_submission(
-			sub=sub,
-			roster=roster,
-			indexes=indexes,
-			interactive=args.interactive,
-			auto_threshold=args.auto_threshold,
-			auto_gap=args.auto_gap,
-			candidate_count=args.candidate_count,
-		)
-
-		out_row = list(row)
-		if student_id is None:
-			unmatched += 1
-			out_row += ["", "", "", reason, f"{score:.3f}"]
-		else:
-			matched += 1
-			ro = roster.get(student_id, {})
-			out_row += [
-				str(student_id),
-				ro.get("username", ""),
-				ro.get("full_name", ""),
-				reason,
-				f"{score:.3f}",
-			]
-		out_rows.append(out_row)
-
-	print(f"Matched: {matched}")
-	print(f"Unmatched: {unmatched}")
+	print(f"Matched: {summary['matched']}")
+	print(f"Unmatched: {summary['unmatched']}")
 
 	if args.dry_run:
 		return
