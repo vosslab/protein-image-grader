@@ -21,11 +21,11 @@ def parse_args():
 	epilog = ""
 	epilog += "Outputs:\n"
 	epilog += "- INDEX.txt (list of generated files)\n"
-	epilog += "- group_members_inferred.csv (group->member names/emails from respondents)\n"
+	epilog += "- Optional group_members_inferred.csv (if enabled)\n"
 	epilog += "\n"
 	epilog += "Example:\n"
 	epilog += "  biotech_480_create_feedback_email_text.py \\\n"
-	epilog += "    -i 480_F25_W1_Group_Present_Eval.csv 480_F25_W2_Group_Present_Eval.csv \\\n"
+	epilog += "    -i 480_F25_W1_Group_Present_Eval.csv \\\n"
 	epilog += "    -o output_peer_feedback/\n"
 
 	parser = argparse.ArgumentParser(
@@ -34,16 +34,20 @@ def parse_args():
 		epilog=epilog,
 	)
 	parser.add_argument(
-		"-i", "--input", dest="input_files", required=True, nargs="+",
-		help="Input CSV file(s) exported from Google Forms."
+		"-i", "--input", dest="input_file", required=True,
+		help="Input CSV file exported from Google Forms."
 	)
 	parser.add_argument(
-		"-o", "--output-dir", dest="output_dir", required=True,
+		"-o", "--output-dir", dest="output_dir", default=".",
 		help="Output directory to write per-group email text files."
 	)
 	parser.add_argument(
 		"-r", "--feedback-regex", dest="feedback_regex", default="shown to the presenters",
 		help="Regex used to detect presenter-visible feedback columns (case-insensitive)."
+	)
+	parser.add_argument(
+		"-x", "--exclude-regex", dest="exclude_regex", default="instructor only",
+		help="Regex for columns to exclude from emails, even if matched (case-insensitive)."
 	)
 	parser.add_argument(
 		"-s", "--subject-prefix", dest="subject_prefix", default="BioTech 480 Group Presentation Peer Feedback",
@@ -71,14 +75,14 @@ def parse_args():
 	parser.set_defaults(exclude_self=True)
 
 	parser.add_argument(
-		"--combine", dest="combine", action="store_true",
-		help="Combine all input files into a single output file per presenting group."
+		"--write-members-csv", dest="write_members_csv", action="store_true",
+		help="Write group_members_inferred.csv (names/emails inferred from respondents)."
 	)
 	parser.add_argument(
-		"--no-combine", dest="combine", action="store_false",
-		help="Write separate output files per input CSV."
+		"--no-write-members-csv", dest="write_members_csv", action="store_false",
+		help="Do not write group_members_inferred.csv."
 	)
-	parser.set_defaults(combine=False)
+	parser.set_defaults(write_members_csv=False)
 
 	args = parser.parse_args()
 	return args
@@ -124,6 +128,28 @@ def clean_question_label(label: str, feedback_regex: str) -> str:
 
 	base = re.sub(r"\s+", " ", base).strip()
 	return base
+
+
+#============================================
+def is_excluded_column(label: str, exclude_regex: str) -> bool:
+	"""
+	Check whether a column should be excluded from presenter emails.
+
+	Args:
+		label (str): Header label without duplicate suffix.
+		exclude_regex (str): Regex of disallowed columns (case-insensitive).
+
+	Returns:
+		bool: True if excluded.
+	"""
+	base = str(label or "").strip()
+	if base == "":
+		return False
+	try:
+		pattern = re.compile(exclude_regex, flags=re.IGNORECASE)
+	except re.error:
+		return False
+	return pattern.search(base) is not None
 
 
 #============================================
@@ -189,6 +215,7 @@ def select_feedback_columns_for_block(
 	block: dict,
 	include_ratings: bool,
 	feedback_regex: str,
+	exclude_regex: str,
 	use_explicit_presenter_cols: bool,
 ) -> list[str]:
 	"""
@@ -225,6 +252,8 @@ def select_feedback_columns_for_block(
 			continue
 
 		base = strip_suffix(h)
+		if is_excluded_column(base, exclude_regex):
+			continue
 		if use_explicit_presenter_cols and pattern is not None:
 			if not pattern.search(base):
 				continue
@@ -243,6 +272,7 @@ def select_feedback_columns_for_block(
 			block=block,
 			include_ratings=include_ratings,
 			feedback_regex=feedback_regex,
+			exclude_regex=exclude_regex,
 			use_explicit_presenter_cols=False,
 		)
 
@@ -297,6 +327,23 @@ def infer_group_membership(
 
 
 #============================================
+def group_base_name(value: str) -> str:
+	"""
+	Extract the base group name (drop anything in parentheses).
+
+	Args:
+		value (str): Group name.
+
+	Returns:
+		str: Base group name.
+	"""
+	text = str(value or "")
+	text = text.split("(", 1)[0]
+	text = text.strip()
+	return text
+
+
+#============================================
 def file_slug(value: str) -> str:
 	"""
 	Make a filesystem-friendly ASCII slug for an output file name.
@@ -316,8 +363,8 @@ def file_slug(value: str) -> str:
 
 
 # Simple sanity check
-_slug = file_slug("Group 7 (Week 2)")
-assert _slug == "group_7_week_2"
+_slug = file_slug(group_base_name("Group 7 (Week 2)"))
+assert _slug == "group_7"
 
 
 #============================================
@@ -350,8 +397,6 @@ def write_group_email_text(
 	group_name: str,
 	week: int | None,
 	source_files: list[str],
-	member_emails: list[str],
-	member_names: list[str],
 	question_to_responses: dict[str, list[str]],
 ):
 	"""
@@ -368,18 +413,6 @@ def write_group_email_text(
 		lines.append("Source files:")
 		for s in source_files:
 			lines.append(f"- {s}")
-
-	if member_emails or member_names:
-		lines.append("")
-		lines.append("Inferred group members (from survey respondents):")
-		if member_names:
-			lines.append("Names:")
-			for n in member_names:
-				lines.append(f"- {n}")
-		if member_emails:
-			lines.append("Emails:")
-			for e in member_emails:
-				lines.append(f"- {e}")
 
 	lines.append("")
 	lines.append("----")
@@ -431,7 +464,9 @@ def process_one_file(csv_path: str, args: argparse.Namespace) -> dict:
 	blocks = colmap["blocks"]
 
 	name_col, email_col = find_identity_columns(headers)
-	group_members = infer_group_membership(rows, group_col, name_col, email_col)
+	group_members = {}
+	if args.write_members_csv:
+		group_members = infer_group_membership(rows, group_col, name_col, email_col)
 
 	suffix_to_group = biotech_480_group_peer_eval.infer_presenting_groups(rows, group_col, blocks)
 	use_explicit_presenter_cols = detect_presenter_feedback_mode(headers, args.feedback_regex)
@@ -447,6 +482,7 @@ def process_one_file(csv_path: str, args: argparse.Namespace) -> dict:
 			block=block,
 			include_ratings=args.include_ratings,
 			feedback_regex=args.feedback_regex,
+			exclude_regex=args.exclude_regex,
 			use_explicit_presenter_cols=use_explicit_presenter_cols,
 		)
 		if presenting_group not in group_to_question_responses:
@@ -489,55 +525,20 @@ def main():
 
 	os.makedirs(args.output_dir, exist_ok=True)
 
-	all_results: list[dict] = []
-	for csv_path in args.input_files:
-		if not os.path.exists(csv_path):
-			raise ValueError(f"Input file not found: {csv_path}")
-		result = process_one_file(csv_path, args)
-		all_results.append(result)
+	csv_path = args.input_file
+	if not os.path.exists(csv_path):
+		raise ValueError(f"Input file not found: {csv_path}")
+	result = process_one_file(csv_path, args)
+	source_name = os.path.basename(csv_path)
 
-	# Build combined structures.
-	combined_members: dict[str, dict[str, set[str]]] = {}
-	combined_feedback: dict[str, dict[str, list[str]]] = {}
-	group_name_by_key: dict[str, str] = {}
 	membership_rows: list[list[str]] = []
+	written_paths: list[str] = []
 
-	for result in all_results:
-		csv_path = result["csv_path"]
-		source_name = os.path.basename(csv_path)
-
+	# Collect membership rows for CSV export (optional).
+	if args.write_members_csv:
 		for g_key, entry in result["group_members"].items():
-			if g_key not in combined_members:
-				combined_members[g_key] = {"groups": set(), "names": set(), "emails": set()}
-			combined_members[g_key]["groups"] |= entry["groups"]
-			combined_members[g_key]["names"] |= entry["names"]
-			combined_members[g_key]["emails"] |= entry["emails"]
-
-			# If we can find a representative group name in the file, store it.
-			if g_key not in group_name_by_key:
-				# Try to use a presenting group name first.
-				for group_name in result["group_to_question_responses"].keys():
-					if biotech_480_group_peer_eval.group_key(group_name) == g_key:
-						group_name_by_key[g_key] = group_name
-						break
-
-		for group_name, qmap in result["group_to_question_responses"].items():
-			if group_name not in combined_feedback:
-				combined_feedback[group_name] = {}
-			for q, resp_list in qmap.items():
-				if q not in combined_feedback[group_name]:
-					combined_feedback[group_name][q] = []
-				combined_feedback[group_name][q] += resp_list
-
-		# Collect membership rows for CSV export.
-		for g_key, entry in result["group_members"].items():
-			g_name = group_name_by_key.get(g_key, None)
-			if g_name is None:
-				group_names_sorted = sorted(list(entry["groups"]))
-				if group_names_sorted:
-					g_name = group_names_sorted[0]
-				else:
-					g_name = g_key
+			group_names_sorted = sorted(list(entry["groups"]))
+			g_name = group_names_sorted[0] if group_names_sorted else g_key
 			names_sorted = sorted(list(entry["names"]))
 			emails_sorted = sorted(list(entry["emails"]))
 
@@ -554,77 +555,47 @@ def main():
 				e = emails_sorted[i] if i < len(emails_sorted) else ""
 				membership_rows.append([g_key, g_name, n, e, source_name])
 
-	# Write inferred membership CSV.
-	members_csv_path = os.path.join(args.output_dir, "group_members_inferred.csv")
-	write_group_members_csv(members_csv_path, membership_rows)
+	# Write inferred membership CSV (optional).
+	members_csv_path = None
+	if args.write_members_csv:
+		members_csv_path = os.path.join(args.output_dir, "group_members_inferred.csv")
+		write_group_members_csv(members_csv_path, membership_rows)
+		written_paths.append(members_csv_path)
 
 	# Write outputs.
 	index_lines: list[str] = []
 	index_lines.append("Generated presenter-feedback email text files:")
 	index_lines.append("")
 
-	if args.combine:
-		for group_name, qmap in sorted(combined_feedback.items(), key=lambda x: x[0]):
-			week = biotech_480_group_peer_eval.parse_week_from_group(group_name)
-			week_tag = f"W{week:02d}" if week is not None else "WXX"
-			g_key = biotech_480_group_peer_eval.group_key(group_name)
-			out_name = f"combined_{week_tag}_{file_slug(group_name)}.txt"
-			out_path = ensure_unique_path(os.path.join(args.output_dir, out_name))
+	for group_name, qmap in sorted(result["group_to_question_responses"].items(), key=lambda x: x[0]):
+		week = biotech_480_group_peer_eval.parse_week_from_group(group_name)
+		base_name = group_base_name(group_name)
+		out_name = f"{file_slug(base_name)}.txt"
+		out_path = ensure_unique_path(os.path.join(args.output_dir, out_name))
+		subject = f"{args.subject_prefix}"
+		if week is not None:
+			subject += f" (Week {week})"
+		subject += f" - {base_name}"
 
-			m = combined_members.get(g_key, {"groups": set(), "names": set(), "emails": set()})
-			member_names = sorted(list(m["names"]))
-			member_emails = sorted(list(m["emails"]))
-
-			subject = f"{args.subject_prefix} ({week_tag}) - {group_name}"
-
-			write_group_email_text(
-				output_path=out_path,
-				subject=subject,
-				group_name=group_name,
-				week=week,
-				source_files=[os.path.basename(r["csv_path"]) for r in all_results],
-				member_emails=member_emails,
-				member_names=member_names,
-				question_to_responses=qmap,
-			)
-			index_lines.append(out_path)
-	else:
-		for result in all_results:
-			csv_path = result["csv_path"]
-			source_name = os.path.basename(csv_path)
-			file_tag = os.path.splitext(source_name)[0]
-
-			for group_name, qmap in sorted(result["group_to_question_responses"].items(), key=lambda x: x[0]):
-				week = biotech_480_group_peer_eval.parse_week_from_group(group_name)
-				week_tag = f"W{week:02d}" if week is not None else "WXX"
-				g_key = biotech_480_group_peer_eval.group_key(group_name)
-				out_name = f"{file_tag}_{week_tag}_{file_slug(group_name)}.txt"
-				out_path = ensure_unique_path(os.path.join(args.output_dir, out_name))
-
-				m = result["group_members"].get(g_key, {"groups": set(), "names": set(), "emails": set()})
-				member_names = sorted(list(m["names"]))
-				member_emails = sorted(list(m["emails"]))
-
-				subject = f"{args.subject_prefix} ({week_tag}) - {group_name}"
-
-				write_group_email_text(
-					output_path=out_path,
-					subject=subject,
-					group_name=group_name,
-					week=week,
-					source_files=[source_name],
-					member_emails=member_emails,
-					member_names=member_names,
-					question_to_responses=qmap,
-				)
-				index_lines.append(out_path)
+		write_group_email_text(
+			output_path=out_path,
+			subject=subject,
+			group_name=base_name,
+			week=week,
+			source_files=[source_name],
+			question_to_responses=qmap,
+		)
+		index_lines.append(out_path)
+		written_paths.append(out_path)
 
 	index_path = os.path.join(args.output_dir, "INDEX.txt")
 	with open(index_path, "w", encoding="utf-8") as handle:
 		handle.write("\n".join(index_lines).rstrip() + "\n")
+	written_paths.append(index_path)
 
-	print(f"Wrote: {index_path}")
-	print(f"Wrote: {members_csv_path}")
+	print("Wrote files:")
+	for p in written_paths:
+		print(p)
 
 
 #============================================
