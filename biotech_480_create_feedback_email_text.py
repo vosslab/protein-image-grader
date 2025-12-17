@@ -3,11 +3,59 @@
 # Standard Library
 import os
 import re
-import csv
 import argparse
+import unicodedata
 
 # Local modules
 import biotech_480_group_peer_eval
+
+
+#============================================
+def unicode_to_string(data: str) -> str:
+	"""
+	Convert Unicode text to ASCII-only text.
+
+	This is inspired by unicode_to_string() in ../rmspaces.py and asciiText() in
+	../kateCleanText.js.
+
+	Args:
+		data (str): Input text.
+
+	Returns:
+		str: ASCII-only text.
+	"""
+	text = str(data or "")
+
+	# Normalize line endings.
+	text = text.replace("\r\n", "\n")
+	text = text.replace("\r", "\n")
+
+	# Common punctuation normalization.
+	text = re.sub(r"[\u201C\u201D\u00AB\u00BB]", "\"", text)
+	text = re.sub(r"[\u2018\u2019]", "'", text)
+	text = re.sub(r"[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u2043\uFE58\uFE63\uFF0D]", "-", text)
+	text = text.replace("\u2026", "...")
+	text = re.sub(r"[\u2022\u00B7]", "*", text)
+	text = text.replace("\u00D7", "x")
+	text = text.replace("\u00F7", "/")
+	text = text.replace("\u2260", "!=")
+	text = text.replace("\u00B1", "+/-")
+	text = text.replace("\u2248", "~")
+	text = text.replace("\uFFFC", "")
+
+	# Strip accents/diacritics and remove anything still non-ASCII.
+	nfkd_form = unicodedata.normalize("NFKD", text)
+	ascii_bytes = nfkd_form.encode("ASCII", "ignore")
+	ascii_only = ascii_bytes.decode("ASCII")
+
+	# Trim trailing whitespace on each line.
+	ascii_only = re.sub(r"[ \t]+$", "", ascii_only, flags=re.MULTILINE)
+	return ascii_only
+
+
+# Simple sanity check
+_ascii_test = unicode_to_string("Diana\u2019s group \u2013 Week 2 \u2026")
+assert _ascii_test == "Diana's group - Week 2 ..."
 
 
 #============================================
@@ -20,8 +68,6 @@ def parse_args():
 	"""
 	epilog = ""
 	epilog += "Outputs:\n"
-	epilog += "- INDEX.txt (list of generated files)\n"
-	epilog += "- Optional group_members_inferred.csv (if enabled)\n"
 	epilog += "\n"
 	epilog += "Example:\n"
 	epilog += "  biotech_480_create_feedback_email_text.py \\\n"
@@ -73,16 +119,6 @@ def parse_args():
 		help="Exclude self-feedback/self-ratings from the output."
 	)
 	parser.set_defaults(exclude_self=True)
-
-	parser.add_argument(
-		"--write-members-csv", dest="write_members_csv", action="store_true",
-		help="Write group_members_inferred.csv (names/emails inferred from respondents)."
-	)
-	parser.add_argument(
-		"--no-write-members-csv", dest="write_members_csv", action="store_false",
-		help="Do not write group_members_inferred.csv."
-	)
-	parser.set_defaults(write_members_csv=False)
 
 	args = parser.parse_args()
 	return args
@@ -153,35 +189,6 @@ def is_excluded_column(label: str, exclude_regex: str) -> bool:
 
 
 #============================================
-def find_identity_columns(headers: list[str]) -> tuple[str | None, str | None]:
-	"""
-	Find likely name/email columns in a Google Forms export.
-
-	Args:
-		headers (list[str]): Header row.
-
-	Returns:
-		tuple[str | None, str | None]: (name_col, email_col)
-	"""
-	email_col = None
-	name_col = None
-
-	for h in headers:
-		h_norm = str(h or "").strip().lower()
-		if email_col is None:
-			if h_norm == "email address" or "email" in h_norm:
-				email_col = h
-
-	for h in headers:
-		h_norm = str(h or "").strip().lower()
-		if name_col is None:
-			if h_norm == "name" or h_norm.startswith("your name") or h_norm.endswith(" name"):
-				name_col = h
-				break
-
-	return name_col, email_col
-
-
 #============================================
 def detect_presenter_feedback_mode(headers: list[str], feedback_regex: str) -> bool:
 	"""
@@ -280,53 +287,6 @@ def select_feedback_columns_for_block(
 
 
 #============================================
-def infer_group_membership(
-	rows: list[dict],
-	group_col: str,
-	name_col: str | None,
-	email_col: str | None,
-) -> dict[str, dict[str, set[str]]]:
-	"""
-	Infer group membership mapping from respondent rows.
-
-	Args:
-		rows (list[dict]): CSV rows.
-		group_col (str): Column for "Which group were you in?".
-		name_col (str | None): Column with respondent name.
-		email_col (str | None): Column with respondent email.
-
-	Returns:
-		dict[str, dict[str, set[str]]]: group_key -> {"groups": set, "names": set, "emails": set}
-	"""
-	out: dict[str, dict[str, set[str]]] = {}
-
-	for row in rows:
-		group_name = row.get(group_col, "")
-		key = biotech_480_group_peer_eval.group_key(group_name)
-		if key == "":
-			continue
-
-		if key not in out:
-			out[key] = {"groups": set(), "names": set(), "emails": set()}
-
-		group_name_str = str(group_name or "").strip()
-		if group_name_str != "":
-			out[key]["groups"].add(group_name_str)
-
-		if name_col is not None:
-			name_val = str(row.get(name_col, "") or "").strip()
-			if name_val != "":
-				out[key]["names"].add(name_val)
-
-		if email_col is not None:
-			email_val = str(row.get(email_col, "") or "").strip()
-			if email_val != "":
-				out[key]["emails"].add(email_val)
-
-	return out
-
-
-#============================================
 def group_base_name(value: str) -> str:
 	"""
 	Extract the base group name (drop anything in parentheses).
@@ -354,7 +314,8 @@ def file_slug(value: str) -> str:
 	Returns:
 		str: Slug containing only a-z, 0-9, and underscores.
 	"""
-	text = str(value or "").strip().lower()
+	text = unicode_to_string(value)
+	text = text.strip().lower()
 	text = re.sub(r"[^a-z0-9]+", "_", text)
 	text = text.strip("_")
 	if text == "":
@@ -365,29 +326,6 @@ def file_slug(value: str) -> str:
 # Simple sanity check
 _slug = file_slug(group_base_name("Group 7 (Week 2)"))
 assert _slug == "group_7"
-
-
-#============================================
-def ensure_unique_path(path: str) -> str:
-	"""
-	Ensure a file path is unique by adding _2, _3, ... if needed.
-
-	Args:
-		path (str): Desired path.
-
-	Returns:
-		str: Unique path that does not already exist.
-	"""
-	if not os.path.exists(path):
-		return path
-
-	base, ext = os.path.splitext(path)
-	i = 2
-	while True:
-		candidate = f"{base}_{i}{ext}"
-		if not os.path.exists(candidate):
-			return candidate
-		i += 1
 
 
 #============================================
@@ -403,16 +341,16 @@ def write_group_email_text(
 	Write a single group email text template.
 	"""
 	lines: list[str] = []
-	lines.append(f"Subject: {subject}")
+	lines.append(f"Subject: {unicode_to_string(subject)}")
 	lines.append("")
 	lines.append("BioTech 480 - Group Presentation Peer Feedback")
-	lines.append(f"Group: {group_name}")
+	lines.append(f"Group: {unicode_to_string(group_name)}")
 	if week is not None:
 		lines.append(f"Week: {week}")
 	if source_files:
 		lines.append("Source files:")
 		for s in source_files:
-			lines.append(f"- {s}")
+			lines.append(f"- {unicode_to_string(s)}")
 
 	lines.append("")
 	lines.append("----")
@@ -423,34 +361,19 @@ def write_group_email_text(
 		lines.append("(No presenter-visible feedback text found.)")
 	else:
 		for q in sorted(question_to_responses.keys()):
+			q_clean = unicode_to_string(q)
 			resp_list = question_to_responses[q]
 			if not resp_list:
 				continue
-			lines.append(q)
+			lines.append(q_clean)
 			for r in resp_list:
-				lines.append(f"- {r}")
+				lines.append(f"- {unicode_to_string(r)}")
 			lines.append("")
 
 	text = "\n".join(lines).rstrip() + "\n"
 
-	with open(output_path, "w", encoding="utf-8") as handle:
+	with open(output_path, "w", encoding="ascii", errors="replace") as handle:
 		handle.write(text)
-
-
-#============================================
-def write_group_members_csv(output_path: str, rows: list[list[str]]):
-	"""
-	Write a CSV file describing inferred group membership.
-
-	Args:
-		output_path (str): Path to write.
-		rows (list[list[str]]): Rows to write.
-	"""
-	with open(output_path, "w", encoding="utf-8", newline="") as handle:
-		writer = csv.writer(handle)
-		writer.writerow(["Group Key", "Group Name", "Member Name", "Member Email", "Source File"])
-		for r in rows:
-			writer.writerow(r)
 
 
 #============================================
@@ -462,11 +385,6 @@ def process_one_file(csv_path: str, args: argparse.Namespace) -> dict:
 	colmap = biotech_480_group_peer_eval.find_key_columns(headers)
 	group_col = colmap["group_col"]
 	blocks = colmap["blocks"]
-
-	name_col, email_col = find_identity_columns(headers)
-	group_members = {}
-	if args.write_members_csv:
-		group_members = infer_group_membership(rows, group_col, name_col, email_col)
 
 	suffix_to_group = biotech_480_group_peer_eval.infer_presenting_groups(rows, group_col, blocks)
 	use_explicit_presenter_cols = detect_presenter_feedback_mode(headers, args.feedback_regex)
@@ -514,7 +432,6 @@ def process_one_file(csv_path: str, args: argparse.Namespace) -> dict:
 
 	return {
 		"csv_path": csv_path,
-		"group_members": group_members,
 		"group_to_question_responses": group_to_question_responses,
 	}
 
@@ -531,36 +448,7 @@ def main():
 	result = process_one_file(csv_path, args)
 	source_name = os.path.basename(csv_path)
 
-	membership_rows: list[list[str]] = []
 	written_paths: list[str] = []
-
-	# Collect membership rows for CSV export (optional).
-	if args.write_members_csv:
-		for g_key, entry in result["group_members"].items():
-			group_names_sorted = sorted(list(entry["groups"]))
-			g_name = group_names_sorted[0] if group_names_sorted else g_key
-			names_sorted = sorted(list(entry["names"]))
-			emails_sorted = sorted(list(entry["emails"]))
-
-			if not names_sorted and not emails_sorted:
-				membership_rows.append([g_key, g_name, "", "", source_name])
-				continue
-
-			# Emit one row per (name,email) combination for human readability.
-			max_len = max(len(names_sorted), len(emails_sorted))
-			if max_len == 0:
-				max_len = 1
-			for i in range(max_len):
-				n = names_sorted[i] if i < len(names_sorted) else ""
-				e = emails_sorted[i] if i < len(emails_sorted) else ""
-				membership_rows.append([g_key, g_name, n, e, source_name])
-
-	# Write inferred membership CSV (optional).
-	members_csv_path = None
-	if args.write_members_csv:
-		members_csv_path = os.path.join(args.output_dir, "group_members_inferred.csv")
-		write_group_members_csv(members_csv_path, membership_rows)
-		written_paths.append(members_csv_path)
 
 	# Write outputs.
 	index_lines: list[str] = []
@@ -570,8 +458,8 @@ def main():
 	for group_name, qmap in sorted(result["group_to_question_responses"].items(), key=lambda x: x[0]):
 		week = biotech_480_group_peer_eval.parse_week_from_group(group_name)
 		base_name = group_base_name(group_name)
-		out_name = f"{file_slug(base_name)}.txt"
-		out_path = ensure_unique_path(os.path.join(args.output_dir, out_name))
+		out_name = f"group_{file_slug(base_name)}.txt"
+		out_path = os.path.join(args.output_dir, out_name)
 		subject = f"{args.subject_prefix}"
 		if week is not None:
 			subject += f" (Week {week})"
@@ -585,13 +473,7 @@ def main():
 			source_files=[source_name],
 			question_to_responses=qmap,
 		)
-		index_lines.append(out_path)
 		written_paths.append(out_path)
-
-	index_path = os.path.join(args.output_dir, "INDEX.txt")
-	with open(index_path, "w", encoding="utf-8") as handle:
-		handle.write("\n".join(index_lines).rstrip() + "\n")
-	written_paths.append(index_path)
 
 	print("Wrote files:")
 	for p in written_paths:
