@@ -88,10 +88,6 @@ def parse_args():
 		help="Output directory to write per-group email text files."
 	)
 	parser.add_argument(
-		"-r", "--feedback-regex", dest="feedback_regex", default="shown to the presenters",
-		help="Regex used to detect presenter-visible feedback columns (case-insensitive)."
-	)
-	parser.add_argument(
 		"-x", "--exclude-regex", dest="exclude_regex", default="instructor only",
 		help="Regex for columns to exclude from emails, even if matched (case-insensitive)."
 	)
@@ -99,16 +95,6 @@ def parse_args():
 		"-s", "--subject-prefix", dest="subject_prefix", default="BioTech 480 Group Presentation Peer Feedback",
 		help="Prefix for the email Subject line."
 	)
-
-	parser.add_argument(
-		"--include-ratings", dest="include_ratings", action="store_true",
-		help="Include rating columns in the output text."
-	)
-	parser.add_argument(
-		"--no-include-ratings", dest="include_ratings", action="store_false",
-		help="Do not include rating columns in the output text."
-	)
-	parser.set_defaults(include_ratings=False)
 
 	parser.add_argument(
 		"--include-self-feedback", dest="exclude_self", action="store_false",
@@ -142,31 +128,6 @@ def strip_suffix(header: str) -> str:
 
 
 #============================================
-def clean_question_label(label: str, feedback_regex: str) -> str:
-	"""
-	Clean up a question label for display in the email text.
-
-	Args:
-		label (str): Raw header (without suffix).
-		feedback_regex (str): Regex used to detect presenter-visible label prefix.
-
-	Returns:
-		str: Cleaned label.
-	"""
-	base = str(label or "").strip()
-
-	# Remove the marker phrase if it is embedded in the question text.
-	try:
-		base = re.sub(feedback_regex, "", base, flags=re.IGNORECASE).strip()
-	except re.error:
-		# If the user provided a broken regex, keep the original label.
-		base = base
-
-	base = re.sub(r"\s+", " ", base).strip()
-	return base
-
-
-#============================================
 def is_excluded_column(label: str, exclude_regex: str) -> bool:
 	"""
 	Check whether a column should be excluded from presenter emails.
@@ -189,100 +150,103 @@ def is_excluded_column(label: str, exclude_regex: str) -> bool:
 
 
 #============================================
-#============================================
-def detect_presenter_feedback_mode(headers: list[str], feedback_regex: str) -> bool:
+def find_group_col(headers: list[str]) -> str:
 	"""
-	Decide whether the CSV includes explicit presenter-feedback marker columns.
-
-	If any header matches feedback_regex, we will prefer those columns. Otherwise we
-	fall back to a heuristic selection.
+	Find the evaluator "Which group were you in?" column.
 
 	Args:
-		headers (list[str]): Header list.
-		feedback_regex (str): Regex used to detect presenter-visible feedback.
+		headers (list[str]): CSV headers.
 
 	Returns:
-		bool: True if explicit presenter feedback columns exist.
+		str: Column header.
 	"""
-	try:
-		pattern = re.compile(feedback_regex, flags=re.IGNORECASE)
-	except re.error:
-		return False
-
 	for h in headers:
-		base = strip_suffix(h)
-		if pattern.search(base):
-			return True
-	return False
+		if str(h or "").strip() == "Which group were you in?":
+			return h
+	raise ValueError("Could not find 'Which group were you in?' column.")
 
 
 #============================================
-def select_feedback_columns_for_block(
-	headers: list[str],
-	block: dict,
-	include_ratings: bool,
-	feedback_regex: str,
-	exclude_regex: str,
-	use_explicit_presenter_cols: bool,
-) -> list[str]:
+def find_own_cols(headers: list[str]) -> list[str]:
 	"""
-	Select which columns should be shown to presenters for one rating/comment block.
+	Find all repeated "Was this YOUR GROUP?" block headers, in order.
 
 	Args:
-		headers (list[str]): Full header list.
-		block (dict): Block definition from biotech_480_group_peer_eval.find_key_columns().
-		include_ratings (bool): Include rating columns.
-		feedback_regex (str): Regex for selecting presenter-visible feedback columns.
-		use_explicit_presenter_cols (bool): If True, select only columns whose labels match feedback_regex.
+		headers (list[str]): CSV headers.
 
 	Returns:
-		list[str]: Selected column headers for this block.
+		list[str]: List of own-block headers in their CSV order.
 	"""
-	suf = block["suffix"]
-	own_col = block["own_col"]
-	rating_cols_set: set[str] = set(block.get("rating_cols", []))
-
 	out: list[str] = []
-	pattern = None
-	if use_explicit_presenter_cols:
-		try:
-			pattern = re.compile(feedback_regex, flags=re.IGNORECASE)
-		except re.error:
-			pattern = None
-
 	for h in headers:
-		if biotech_480_group_peer_eval.col_suffix(h) != suf:
-			continue
-		if h == own_col:
-			continue
-		if (not include_ratings) and (h in rating_cols_set):
-			continue
+		if str(h or "").startswith("Was this YOUR GROUP?"):
+			out.append(h)
+	if not out:
+		raise ValueError("Could not find any 'Was this YOUR GROUP?' columns.")
+	return out
 
+
+#============================================
+def unique_preserve_order(items: list[str]) -> list[str]:
+	"""
+	De-duplicate strings while preserving order.
+
+	Args:
+		items (list[str]): Input list.
+
+	Returns:
+		list[str]: Unique values preserving first-seen order.
+	"""
+	seen: set[str] = set()
+	out: list[str] = []
+	for x in items:
+		if x in seen:
+			continue
+		seen.add(x)
+		out.append(x)
+	return out
+
+
+#============================================
+def select_key_columns_for_block(
+	headers: list[str],
+	exclude_regex: str,
+) -> dict[str, str]:
+	"""
+	Select the four key columns for a block: PRODUCT, SUMMARY, BEST, NEEDS IMPROVEMENT.
+
+	Args:
+		headers (list[str]): Headers within this block only.
+		exclude_regex (str): Exclusion regex.
+
+	Returns:
+		dict[str, str]: category -> header.
+	"""
+	patterns: list[tuple[str, re.Pattern]] = [
+		("PRODUCT", re.compile(r"\bmain\s+PRODUCT\b", flags=re.IGNORECASE)),
+		("SUMMARY", re.compile(r"\bshort\s+SUMMARY\b", flags=re.IGNORECASE)),
+		("BEST", re.compile(r"\bBEST\s+part\b", flags=re.IGNORECASE)),
+		("NEEDS IMPROVEMENT", re.compile(r"\bNEEDS\s+IMPROVEMENT\b", flags=re.IGNORECASE)),
+	]
+
+	found: dict[str, str] = {}
+	for h in headers:
 		base = strip_suffix(h)
 		if is_excluded_column(base, exclude_regex):
 			continue
-		if use_explicit_presenter_cols and pattern is not None:
-			if not pattern.search(base):
+
+		for key, pat in patterns:
+			if key in found:
 				continue
+			if pat.search(base):
+				found[key] = h
 
-		# Heuristic fallback: include any non-rating columns in the block.
-		if (not use_explicit_presenter_cols) and (h in rating_cols_set):
+	out: dict[str, str] = {}
+	for key, _pat in patterns:
+		h = found.get(key)
+		if h is None:
 			continue
-
-		out.append(h)
-
-	# If we detected explicit presenter-feedback columns but found none for this
-	# block, fall back to the heuristic selection so we still produce output.
-	if use_explicit_presenter_cols and not out:
-		out = select_feedback_columns_for_block(
-			headers=headers,
-			block=block,
-			include_ratings=include_ratings,
-			feedback_regex=feedback_regex,
-			exclude_regex=exclude_regex,
-			use_explicit_presenter_cols=False,
-		)
-
+		out[key] = h
 	return out
 
 
@@ -354,13 +318,16 @@ def write_group_email_text(
 
 	lines.append("")
 	lines.append("----")
-	lines.append("Presenter-visible feedback (anonymized):")
+	lines.append("Peer feedback (anonymized):")
 	lines.append("")
 
 	if not question_to_responses:
 		lines.append("(No presenter-visible feedback text found.)")
 	else:
-		for q in sorted(question_to_responses.keys()):
+		preferred = ["PRODUCT", "SUMMARY", "BEST", "NEEDS IMPROVEMENT"]
+		for q in preferred:
+			if q not in question_to_responses:
+				continue
 			q_clean = unicode_to_string(q)
 			resp_list = question_to_responses[q]
 			if not resp_list:
@@ -382,53 +349,56 @@ def process_one_file(csv_path: str, args: argparse.Namespace) -> dict:
 	Process a single peer-eval CSV into per-group feedback content.
 	"""
 	headers, rows = biotech_480_group_peer_eval.read_csv_rows(csv_path)
-	colmap = biotech_480_group_peer_eval.find_key_columns(headers)
-	group_col = colmap["group_col"]
-	blocks = colmap["blocks"]
-
-	suffix_to_group = biotech_480_group_peer_eval.infer_presenting_groups(rows, group_col, blocks)
-	use_explicit_presenter_cols = detect_presenter_feedback_mode(headers, args.feedback_regex)
-
+	group_col = find_group_col(headers)
+	own_cols = find_own_cols(headers)
 	group_to_question_responses: dict[str, dict[str, list[str]]] = {}
 
-	for block in blocks:
-		suf = block["suffix"]
-		presenting_group = suffix_to_group.get(suf, f"Unknown Block {suf}")
+	# Compute header ranges for each block based on the position of the repeated
+	# "Was this YOUR GROUP?" column, instead of relying on ".1/.2" header suffixes.
+	# Some repeated questions have slightly different wording, so Google Forms
+	# won't add the suffix and suffix-based grouping mis-assigns feedback.
+	ordered_blocks: list[tuple[int, str]] = []
+	for own_col in own_cols:
+		ordered_blocks.append((headers.index(own_col), own_col))
+	ordered_blocks.sort(key=lambda x: x[0])
 
-		feedback_cols = select_feedback_columns_for_block(
-			headers=headers,
-			block=block,
-			include_ratings=args.include_ratings,
-			feedback_regex=args.feedback_regex,
-			exclude_regex=args.exclude_regex,
-			use_explicit_presenter_cols=use_explicit_presenter_cols,
-		)
+	for i, (own_idx, own_col) in enumerate(ordered_blocks):
+		next_idx = ordered_blocks[i + 1][0] if i + 1 < len(ordered_blocks) else len(headers)
+		block_headers = headers[own_idx + 1:next_idx]
+
+		candidates: list[str] = []
+		for row in rows:
+			if biotech_480_group_peer_eval.norm_text(row.get(own_col)) == "yes":
+				candidates.append(row.get(group_col, ""))
+		presenting_group = biotech_480_group_peer_eval.mode_string(candidates)
+		if presenting_group is None:
+			presenting_group = f"Unknown block {i + 1}"
+
+		key_cols = select_key_columns_for_block(block_headers, args.exclude_regex)
 		if presenting_group not in group_to_question_responses:
 			group_to_question_responses[presenting_group] = {}
 
-		own_col = block["own_col"]
 		for row in rows:
 			is_self = biotech_480_group_peer_eval.norm_text(row.get(own_col)) == "yes"
 			if args.exclude_self and is_self:
 				continue
 
-			for c in feedback_cols:
-				val = row.get(c, "")
+			for key, col in key_cols.items():
+				val = row.get(col, "")
 				val_str = str(val or "").strip()
 				if val_str == "":
 					continue
 
-				q_base = strip_suffix(c)
-				q_label = clean_question_label(q_base, args.feedback_regex)
-				if q_label == "":
-					q_label = q_base
-
-				if q_label not in group_to_question_responses[presenting_group]:
-					group_to_question_responses[presenting_group][q_label] = []
+				if key not in group_to_question_responses[presenting_group]:
+					group_to_question_responses[presenting_group][key] = []
 
 				# Normalize whitespace so text emails read cleanly.
 				val_str = re.sub(r"\s+", " ", val_str).strip()
-				group_to_question_responses[presenting_group][q_label].append(val_str)
+				group_to_question_responses[presenting_group][key].append(val_str)
+
+		# De-duplicate within each question to reduce noise.
+		for q_label, resp_list in group_to_question_responses[presenting_group].items():
+			group_to_question_responses[presenting_group][q_label] = unique_preserve_order(resp_list)
 
 	return {
 		"csv_path": csv_path,
