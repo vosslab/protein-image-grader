@@ -10,6 +10,7 @@ Grading system for biochemistry protein images.
 
 ## Project layout
 - `spec_yaml_files/` holds assignment spec YAML files.
+- `spec_yaml_files/common_image_questions.yml` holds shared image questions.
 - `data/inputs/` holds current roster data and templates.
 - `data/runs/` holds generated grading outputs.
 - `archive/` holds the cheat detection hash database and archive images (images ignored by git).

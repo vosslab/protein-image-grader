@@ -215,9 +215,6 @@ def update_image_hashes(image_hashes: dict, md5hash: str, phash: str,
 #============================================
 def read_and_save_student_images(student_tree: list, params: dict) -> None:
 	"""Process student images, checking for duplicates and updating student entries."""
-	global console
-	global download_count
-
 	image_hashes_yaml = params.get('image_hashes_yaml')
 	image_hashes = load_image_hashes(image_hashes_yaml)
 	hashes_changed = False

@@ -460,7 +460,6 @@ def display_info(params: dict):
 	Args:
 		params (dict): Dictionary containing file paths and image number.
 	"""
-	global console
 	table = Table(show_header=True, header_style="bold magenta")
 
 	table.add_column("Name", style="dim", width=20)
@@ -492,8 +491,6 @@ def validate_questions(read_only_config: dict):
 		read_only_config (dict): Dictionary containing YAML configuration.
 	"""
 	used_csv_columns = {}
-	global console
-
 	for question_dict in read_only_config['csv_questions']:
 		csv_column = question_dict['csv_column']
 		if csv_column in used_csv_columns:
@@ -501,7 +498,61 @@ def validate_questions(read_only_config: dict):
 			console.print(used_csv_columns[csv_column])
 			console.print(question_dict['name'])
 			raise ValueError
-		used_csv_columns[csv_column] = question_dict['name']
+	used_csv_columns[csv_column] = question_dict['name']
+
+#============================================
+def load_common_image_questions(spec_dir: str) -> list:
+	"""
+	Load common image questions from the spec directory.
+	"""
+	common_path = os.path.join(spec_dir, "common_image_questions.yml")
+	if not os.path.isfile(common_path):
+		return []
+	with open(common_path, 'r') as f:
+		common_config = yaml.safe_load(f)
+	if common_config is None:
+		return []
+	return common_config.get('image_questions', [])
+
+#============================================
+def merge_image_questions(common_list: list, specific_list: list) -> list:
+	"""
+	Merge common and assignment-specific image questions.
+	"""
+	common_list = common_list or []
+	specific_list = specific_list or []
+
+	specific_map = {}
+	for question_dict in specific_list:
+		if not isinstance(question_dict, dict):
+			continue
+		name = question_dict.get('name')
+		if name:
+			specific_map[name] = question_dict
+
+	merged = []
+	used = set()
+	for question_dict in common_list:
+		if not isinstance(question_dict, dict):
+			continue
+		name = question_dict.get('name')
+		if name and specific_map.get(name) is not None:
+			merged.append(specific_map[name])
+			used.add(name)
+		else:
+			merged.append(question_dict)
+			if name:
+				used.add(name)
+
+	for question_dict in specific_list:
+		if not isinstance(question_dict, dict):
+			continue
+		name = question_dict.get('name')
+		if name in used:
+			continue
+		merged.append(question_dict)
+
+	return merged
 
 #============================================
 
@@ -519,10 +570,17 @@ def load_yaml_config(params: dict) -> dict:
 	with open(params["config_yaml"], 'r') as f:
 		config = yaml.safe_load(f)
 
+	# Merge common image questions if present
+	if config.get('use_common_image_questions', True) is True:
+		common_questions = load_common_image_questions(params["spec_dir"])
+		if common_questions:
+			config['image_questions'] = merge_image_questions(
+				common_questions,
+				config.get('image_questions', [])
+			)
+
 	# Convert config to read-only dictionary
 	read_only_config = MappingProxyType(config)
-	global console
-
 	# Validate image number
 	if read_only_config['image number'] != params["image_number"]:
 		console.print(
@@ -629,7 +687,6 @@ def process_data(student_tree: list, params: dict, read_only_config_dict: dict) 
 	None
 		Updates the student_tree list in-place.
 	"""
-	global console
 	t0 = time.time()
 	console.print("\nPre-Processing Student Images", style=data_color)
 	console.print("\nDownloading and Reading Student Images", style=data_color)

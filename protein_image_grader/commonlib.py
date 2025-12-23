@@ -227,36 +227,19 @@ class CommonLib(object):
 
 	#=======================
 	def unicodeToString(self, data):
-		return data
-		try:
-			udata = data.decode("utf-8")
-		except AttributeError:
-			udata = unicode(data)
-		
-		try:
-			nfkd_form = unicodedata.normalize('NFKD', udata)
-		except:
-			print("Error cannot read this", udata, type(udata))
-			sys.exit(1)
-		only_ascii = nfkd_form.encode('ASCII', 'ignore')
-		my_str = only_ascii.decode('ASCII')
-		#print(my_str)
-		return str(my_str)
-		#string = unicodedata.normalize('NFKD', udata)
-		#asciidata = udata.encode("ascii","ignore")
-		if not isinstance(data, str) and not isinstance(data, str):
+		if data is None:
+			return ''
+		if not isinstance(data, str):
 			try:
-				data = data.decode("utf8")
+				data = data.decode("utf-8")
 			except AttributeError:
-				data = data.text[0]
+				data = str(data)
 		try:
-			data = str(data)
 			string = unicodedata.normalize('NFKD', data)
-		except UnicodeDecodeError:
-			print(data)
-			string = data
-		string = str(string.encode('ascii', 'ignore'))
-		return string
+		except TypeError:
+			string = str(data)
+		only_ascii = string.encode('ASCII', 'ignore').decode('ASCII')
+		return only_ascii
 
 	#===============
 	def md5sumfile(self, filename):
@@ -264,7 +247,7 @@ class CommonLib(object):
 		Returns an md5 hash for file filename
 		"""
 		if not os.path.isfile(filename):
-			apDisplay.printError("MD5SUM, file not found: "+filename)
+			raise ValueError(f"MD5SUM, file not found: {filename}")
 		print(("MD5SUM "+filename))
 		f = open(filename, 'rb')
 		import hashlib

@@ -19,3 +19,7 @@
 - Generate visual grading HTML from `grade_protein_image.py` using shared HTML helpers.
 - Update `README.md` and add usage and file structure docs.
 - Add archive process spec documentation.
+- Merge `common_image_questions.yml` into assignment specs at load time.
+- Add basic test scripts for common merge and pyflakes.
+- Fix pyflakes warnings and skip archive content in lint script.
+- Fix test import path for `protein_image_grader` package.

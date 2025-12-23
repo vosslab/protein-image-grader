@@ -366,7 +366,6 @@ def send_http_request(url: str, session_data=None):
 #============================================
 
 def download_image(file_id):
-	global service
 	# Initialize the file request for downloading the image
 	#print(f"fileId={file_id}")
 	#print("request = service.files().get_media(fileId=file_id)")
