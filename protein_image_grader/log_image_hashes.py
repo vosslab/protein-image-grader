@@ -58,14 +58,20 @@ if __name__ == '__main__':
 	md5_dict = {}
 	phash_dict = {}
 
-	# Iterate over each file in the images folder
+	archive_root = 'archive'
+	archive_hashes = os.path.join(archive_root, 'image_hashes.yml')
+	if not os.path.isdir(archive_root):
+		raise ValueError(f"Archive directory not found: {archive_root}")
+
+	# Iterate over each file in the archive images folders
 	image_files = []
-	#image_files = glob.glob('ARCHIVE_IMAGES/BCHM_Prot_Img_*/*.*')
-	for root, dirs, files in os.walk('ARCHIVE_IMAGES/'):
+	for root, dirs, files in os.walk(archive_root):
+		if 'ARCHIVE_IMAGES' not in root.split(os.sep):
+			continue
 		for file in files:
 			full_path = os.path.join(root, file)
-			if os.path.isfile(full_path):  # Ensures it's a file, not a directory
-					image_files.append(full_path)
+			if os.path.isfile(full_path):
+				image_files.append(full_path)
 	image_files.sort()
 	summarize_extensions(image_files)
 	for filepath in image_files:
@@ -80,5 +86,5 @@ if __name__ == '__main__':
 		phash_dict[perceptual_hash] = filepath
 
 	# Save the dictionaries to a YAML file
-	with open('image_hashes.yml', 'w') as f:
+	with open(archive_hashes, 'w') as f:
 		yaml.dump({'md5': md5_dict, 'phash': phash_dict}, f)

@@ -7,12 +7,14 @@ import sys
 import csv
 import time
 import random
+import shutil
 import argparse
 
 # PIP3 modules
 import PIL.Image
 import googleapiclient.errors
 from pillow_heif import register_heif_opener
+import yaml
 
 # local repo modules
 import protein_image_grader.commonlib as commonlib
@@ -45,18 +47,6 @@ def parse_args():
 		help="Output directory for downloads and HTML", default="data/runs")
 	parser.add_argument('-p', '--profiles-html', dest='profiles_html', type=str,
 		help="Output HTML file name", default=None)
-	parser.add_argument("--year", dest="year", type=int,
-		help="Year for grouping outputs", default=0)
-	parser.add_argument("--term", dest="term", type=str,
-		choices=("1Spring", "2Summer", "3Fall"),
-		help="Term for grouping outputs", default=None)
-	parser.add_argument("--session", dest="session", type=str,
-		help="Session label override", default=None)
-	parser.add_argument('--session-dir', dest='use_session_dir',
-		help='Organize outputs by session subfolder', action='store_true')
-	parser.add_argument('--no-session-dir', dest='use_session_dir',
-		help='Do not organize outputs by session subfolder', action='store_false')
-	parser.set_defaults(use_session_dir=True)
 	parser.add_argument('--image-number', dest='image_number', default=0,
 		type=int, required=False)
 	args = parser.parse_args()
@@ -79,7 +69,8 @@ def build_image_dir(image_number: int, output_dir: str) -> str:
 	return os.path.join(output_dir, f"DOWNLOAD_images_year_{current_year:04d}")
 
 #============================================
-def get_image_html_tag(image_url: str, ruid: int, args, image_dir: str) -> str:
+def get_image_html_tag(image_url: str, ruid: int, args, image_dir: str,
+		archive_dir: str, image_hashes: dict, hashes_changed: list) -> str:
 	"""
 	Download image from Google Drive and return an HTML tag linking to the local file.
 
@@ -105,6 +96,14 @@ def get_image_html_tag(image_url: str, ruid: int, args, image_dir: str) -> str:
 			return ''
 	else:
 		print(f"file exists: {filename}")
+
+	archive_path = archive_image_if_needed(filepath, archive_dir)
+	if archive_path and image_hashes is not None:
+		with open(archive_path, 'rb') as f:
+			md5hash, phash = test_google_image.get_hash_data(f)
+		hashes_changed[0] = update_image_hashes(
+			image_hashes, md5hash, phash, archive_path
+		) or hashes_changed[0]
 
 	trim_path = None
 	if args.trim:
@@ -182,6 +181,23 @@ def download_and_save_image(image_data, filepath: str) -> bool:
 	pil_image.save(filepath)
 	print(f"saved {os.path.basename(filepath)}")
 	return True
+
+#============================================
+def archive_image_if_needed(filepath: str, archive_dir: str) -> str:
+	"""
+	Copy a saved image into the archive folder if it is not already there.
+	"""
+	if archive_dir is None:
+		return None
+	if not os.path.isfile(filepath):
+		return None
+	if not os.path.isdir(archive_dir):
+		os.makedirs(archive_dir)
+	archive_path = os.path.join(archive_dir, os.path.basename(filepath))
+	if os.path.isfile(archive_path):
+		return archive_path
+	shutil.copy2(filepath, archive_path)
+	return archive_path
 
 #============================================
 def trim_and_save_image(filepath: str, rotate: bool=False) -> str:
@@ -278,7 +294,7 @@ def extract_number_in_range(s: str) -> int:
 	for match in matches:
 		num = int(match)
 		if 1 <= num <= 20:
-	return num
+			return num
 	print(f"No number in range 1-20 found in string: {s}")
 	sys.exit(1)
 
@@ -294,8 +310,68 @@ def get_term_from_month(month: int) -> str:
 	return "3Fall"
 
 #============================================
+def get_archive_assignment_dir(image_number: int, spec_dir: str) -> str:
+	"""
+	Build the archive assignment directory path.
+	"""
+	current_year = time.localtime().tm_year
+	current_term = get_term_from_month(time.localtime().tm_mon)
+	archive_session_dir = os.path.join("archive", f"{current_year}_{current_term}")
+	archive_images_dir = os.path.join(archive_session_dir, "ARCHIVE_IMAGES")
+
+	assignment_name = None
+	spec_yaml = os.path.join(spec_dir, f"protein_image_{image_number:02d}.yml")
+	if os.path.isfile(spec_yaml):
+		with open(spec_yaml, 'r') as f:
+			config = yaml.safe_load(f)
+			assignment_name = config.get('assignment name', None)
+
+	assignment_dir = f"BCHM_Prot_Img_{image_number:02d}"
+	if assignment_name:
+		clib = commonlib.CommonLib()
+		clean_name = clib.cleanName(assignment_name)
+		if clean_name:
+			assignment_dir = f"{assignment_dir}_{clean_name}"
+
+	return os.path.join(archive_images_dir, assignment_dir)
+
+#============================================
+def load_image_hashes(image_hashes_yaml: str) -> dict:
+	"""
+	Load image hashes from YAML or initialize an empty structure.
+	"""
+	if image_hashes_yaml is None:
+		return {'md5': {}, 'phash': {}}
+	if not os.path.isfile(image_hashes_yaml):
+		return {'md5': {}, 'phash': {}}
+	with open(image_hashes_yaml, 'r') as f:
+		image_hashes = yaml.safe_load(f)
+	if image_hashes is None:
+		return {'md5': {}, 'phash': {}}
+	if image_hashes.get('md5') is None:
+		image_hashes['md5'] = {}
+	if image_hashes.get('phash') is None:
+		image_hashes['phash'] = {}
+	return image_hashes
+
+#============================================
+def update_image_hashes(image_hashes: dict, md5hash: str, phash: str,
+		archive_path: str) -> bool:
+	"""
+	Update image hash dictionaries with a new entry.
+	"""
+	changed = False
+	if md5hash and image_hashes['md5'].get(md5hash) is None:
+		image_hashes['md5'][md5hash] = archive_path
+		changed = True
+	if phash and image_hashes['phash'].get(phash) is None:
+		image_hashes['phash'][phash] = archive_path
+		changed = True
+	return changed
+
+#============================================
 def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: str,
-		output_html: str):
+		archive_dir: str, output_html: str, image_hashes: dict, hashes_changed: list):
 	"""
 	Generate an HTML file based on the CSV data.
 	"""
@@ -319,7 +395,9 @@ def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: 
 				elif item.startswith('900') or item.startswith('960'):
 					ruid = int(item)
 				elif item.startswith('http'):
-					img_html_tag = get_image_html_tag(item, ruid, args, image_dir)
+					img_html_tag = get_image_html_tag(
+						item, ruid, args, image_dir, archive_dir, image_hashes, hashes_changed
+					)
 					output.write(f"{img_html_tag}\n")
 				else:
 					output.write(f"<p><b>{header[i].strip()}</b>:&nbsp; {row[i].strip()}</p>\n")
@@ -332,24 +410,45 @@ def open_html_in_browser(html_path: str):
 	os.system(f"open {html_path}")
 
 #============================================
+def write_html_from_student_tree(student_tree: list, output_html: str) -> None:
+	"""
+	Write an HTML file using a student_tree list that already includes output filenames.
+	"""
+	output_dir = os.path.dirname(output_html)
+	if output_dir and not os.path.isdir(output_dir):
+		os.makedirs(output_dir)
+
+	with open(output_html, "w") as output:
+		write_header(output, output_html)
+		count = 0
+		for student_entry in student_tree:
+			count += 1
+			if count > 1:
+				output.write('<br/><p style="page-break-before: always"><br/></p>\n')
+
+			student_id = student_entry.get('Student ID', '')
+			first_name = student_entry.get('First Name', '')
+			last_name = student_entry.get('Last Name', '')
+			original_filename = student_entry.get('Original Filename', '')
+			output_filename = student_entry.get('Output Filename', '')
+			if output_filename:
+				image_path = os.path.abspath(output_filename)
+				output.write(f"<img border='3' src='file://{image_path}' height='350' />\n")
+
+			if student_id:
+				output.write(f"<p><b>Student ID</b>:&nbsp; {student_id}</p>\n")
+			if first_name or last_name:
+				output.write(f"<p><b>Student</b>:&nbsp; {first_name} {last_name}</p>\n")
+			if original_filename:
+				output.write(f"<p><b>Original Filename</b>:&nbsp; {original_filename}</p>\n")
+	return
+
+#============================================
 def main():
 	"""
 	Main function to parse arguments and process the CSV file.
 	"""
 	args = parse_args()
-
-	year = args.year
-	term = args.term
-	session = args.session
-
-	if year == 0:
-		year = time.localtime().tm_year
-	if term is None:
-		term = get_term_from_month(time.localtime().tm_mon)
-	if session is None:
-		session = f"{year}_{term}"
-	if args.use_session_dir:
-		args.output_dir = os.path.join(args.output_dir, session)
 
 	if not os.path.isdir(args.output_dir):
 		os.makedirs(args.output_dir)
@@ -366,8 +465,18 @@ def main():
 		args.profiles_html = os.path.join(
 			args.output_dir, f"profiles_image_{args.image_number:02d}.html")
 
-	generate_html(args.csvfile, header, data_tree, args, image_dir, args.profiles_html)
+	archive_dir = get_archive_assignment_dir(args.image_number, "spec_yaml_files")
+
+	image_hashes_yaml = os.path.join("archive", "image_hashes.yml")
+	image_hashes = load_image_hashes(image_hashes_yaml)
+	hashes_changed = [False]
+
+	generate_html(args.csvfile, header, data_tree, args, image_dir, archive_dir,
+		args.profiles_html, image_hashes, hashes_changed)
 	open_html_in_browser(args.profiles_html)
+	if hashes_changed[0]:
+		with open(image_hashes_yaml, 'w') as f:
+			yaml.dump(image_hashes, f)
 
 #============================================
 if __name__ == '__main__':

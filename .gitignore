@@ -3,6 +3,9 @@ __pycache__/
 *.py[codz]
 *$py.class
 Protein_Images_Archive_Content
+archive/**
+!archive/
+!archive/image_hashes.yml
 data/inputs/current_students.csv
 data/runs/*
 !data/runs/.gitkeep

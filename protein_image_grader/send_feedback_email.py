@@ -178,18 +178,6 @@ def run_script(script_text):
 	return
 
 #===============================================
-def get_term_from_month(month: int) -> str:
-	"""
-	Map month to term label.
-	"""
-	if 1 <= month <= 5:
-		return "1Spring"
-	if 6 <= month <= 8:
-		return "2Summer"
-	return "3Fall"
-
-#===============================================
-#===============================================
 def main():
 	# Initialize the argument parser
 	parser = argparse.ArgumentParser(description="Script to send feedback emails based on input CSV.")
@@ -200,18 +188,6 @@ def main():
 		help="Assignment spec YAML directory", default="spec_yaml_files")
 	parser.add_argument("-o", "--run-dir", dest="run_dir", type=str,
 		help="Output run directory", default="data/runs")
-	parser.add_argument("--year", dest="year", type=int,
-		help="Year for grouping outputs", default=0)
-	parser.add_argument("--term", dest="term", type=str,
-		choices=("1Spring", "2Summer", "3Fall"),
-		help="Term for grouping outputs", default=None)
-	parser.add_argument("--session", dest="session", type=str,
-		help="Session label override", default=None)
-	parser.add_argument('--session-dir', dest='use_session_dir',
-		help='Organize outputs by session subfolder', action='store_true')
-	parser.add_argument('--no-session-dir', dest='use_session_dir',
-		help='Do not organize outputs by session subfolder', action='store_false')
-	parser.set_defaults(use_session_dir=True)
 	#parser.add_argument('-s', '--subject', dest='subject', help='Subject of the email, take from YAML file')
 	parser.add_argument('-n', '--dry-run', dest="dry_run", action='store_true',
 		help="Perform a dry run. Process the data but don't send emails.")
@@ -222,18 +198,6 @@ def main():
 	image_number = args.image_number
 	spec_dir = args.spec_dir
 	run_dir = args.run_dir
-	year = args.year
-	term = args.term
-	session = args.session
-
-	if year == 0:
-		year = time.localtime().tm_year
-	if term is None:
-		term = get_term_from_month(time.localtime().tm_mon)
-	if session is None:
-		session = f"{year}_{term}"
-	if args.use_session_dir:
-		run_dir = os.path.join(run_dir, session)
 
 	if not os.path.isdir(spec_dir):
 		raise ValueError(f"Spec directory not found: {spec_dir}")

@@ -3,7 +3,9 @@
 import os
 import sys
 import glob
+import shutil
 import protein_image_grader.commonlib as commonlib
+import yaml
 from rich.console import Console
 from rich.style import Style
 from PIL import Image
@@ -157,16 +159,88 @@ def save_image(image_dict: dict, output_filename: str):
 	image_dict['pil_image'].close()
 
 #============================================
+def archive_image_if_needed(output_filename: str, params: dict) -> None:
+	"""
+	Copy a saved image into the archive folder if it is not already there.
+	"""
+	if output_filename is None:
+		return
+	if not os.path.isfile(output_filename):
+		return
+	archive_dir = params.get('archive_assignment_dir')
+	if archive_dir is None:
+		return
+	if not os.path.isdir(archive_dir):
+		os.makedirs(archive_dir)
+	archive_path = os.path.join(archive_dir, os.path.basename(output_filename))
+	if os.path.isfile(archive_path):
+		return
+	shutil.copy2(output_filename, archive_path)
+	return
+
+#============================================
+def load_image_hashes(image_hashes_yaml: str) -> dict:
+	"""
+	Load image hashes from YAML or initialize an empty structure.
+	"""
+	if image_hashes_yaml is None:
+		return {'md5': {}, 'phash': {}}
+	if not os.path.isfile(image_hashes_yaml):
+		return {'md5': {}, 'phash': {}}
+	with open(image_hashes_yaml, 'r') as f:
+		image_hashes = yaml.safe_load(f)
+	if image_hashes is None:
+		return {'md5': {}, 'phash': {}}
+	if image_hashes.get('md5') is None:
+		image_hashes['md5'] = {}
+	if image_hashes.get('phash') is None:
+		image_hashes['phash'] = {}
+	return image_hashes
+
+#============================================
+def update_image_hashes(image_hashes: dict, md5hash: str, phash: str,
+		archive_path: str) -> bool:
+	"""
+	Update image hash dictionaries with a new entry.
+	"""
+	changed = False
+	if md5hash and image_hashes['md5'].get(md5hash) is None:
+		image_hashes['md5'][md5hash] = archive_path
+		changed = True
+	if phash and image_hashes['phash'].get(phash) is None:
+		image_hashes['phash'][phash] = archive_path
+		changed = True
+	return changed
+
+#============================================
 def read_and_save_student_images(student_tree: list, params: dict) -> None:
 	"""Process student images, checking for duplicates and updating student entries."""
 	global console
 	global download_count
+
+	image_hashes_yaml = params.get('image_hashes_yaml')
+	image_hashes = load_image_hashes(image_hashes_yaml)
+	hashes_changed = False
 
 	skip_count = 0
 	processed_count = 0
 	for student_entry in student_tree:
 		# Skip if image format already exists
 		if student_entry.get("Image Format") is not None:
+			output_filename = student_entry.get('Output Filename')
+			archive_image_if_needed(output_filename, params)
+			if output_filename:
+				archive_dir = params.get('archive_assignment_dir')
+				archive_path = None
+				if archive_dir:
+					archive_path = os.path.join(archive_dir, os.path.basename(output_filename))
+				if archive_path and student_entry.get('128-bit MD5 Hash'):
+					hashes_changed = update_image_hashes(
+						image_hashes,
+						student_entry.get('128-bit MD5 Hash'),
+						student_entry.get('Perceptual Hash'),
+						archive_path
+					) or hashes_changed
 			skip_count += 1
 			continue
 
@@ -179,9 +253,24 @@ def read_and_save_student_images(student_tree: list, params: dict) -> None:
 		# Ensure the image is saved if it's new
 		if not os.path.exists(image_dict['output_filename']):
 			save_image(image_dict, image_dict['output_filename'])
+		archive_image_if_needed(image_dict['output_filename'], params)
+		archive_dir = params.get('archive_assignment_dir')
+		archive_path = None
+		if archive_dir:
+			archive_path = os.path.join(archive_dir, os.path.basename(image_dict['output_filename']))
+		if archive_path:
+			hashes_changed = update_image_hashes(
+				image_hashes,
+				student_entry.get('128-bit MD5 Hash'),
+				student_entry.get('Perceptual Hash'),
+				archive_path
+			) or hashes_changed
 
 	console.print("=============================")
 	console.print(f"skipped {skip_count} of {len(student_tree)}")
 	console.print(f"downloaded {download_count} of {processed_count}")
 	console.print('DONE\n\n', style="bright_green")
+	if image_hashes_yaml and hashes_changed:
+		with open(image_hashes_yaml, 'w') as f:
+			yaml.dump(image_hashes, f)
 	return

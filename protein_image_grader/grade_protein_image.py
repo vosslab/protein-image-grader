@@ -21,6 +21,7 @@ import protein_image_grader.interactive_image_criteria_class as interactive_imag
 import protein_image_grader.read_save_images as read_save_images
 import protein_image_grader.student_id_protein as student_id_protein
 import protein_image_grader.timestamp_tools as timestamp_tools
+import protein_image_grader.download_submission_images as download_submission_images
 
 console = Console()
 warning_color = Style(color="rgb(255, 187, 51)" )  # RGB for bright orange
@@ -357,6 +358,11 @@ def parse_args() -> None:
 		description="Process student answers from a CSV based on a given YAML config.")
 	parser.add_argument("-i", dest="image_number", type=int,
 		help="Protein Image Number", required=True)
+	parser.add_argument('--make-html', dest='make_html',
+		help='Generate HTML for visual grading', action='store_true')
+	parser.add_argument('--no-make-html', dest='make_html',
+		help='Skip HTML generation', action='store_false')
+	parser.set_defaults(make_html=True)
 	parser.add_argument("-s", "--spec-dir", dest="spec_dir", type=str,
 		help="Assignment spec YAML directory", default="spec_yaml_files")
 	parser.add_argument("-d", "--data-dir", dest="data_dir", type=str,
@@ -369,7 +375,6 @@ def parse_args() -> None:
 	args = parser.parse_args()
 	return args
 
-#============================================
 def parse_and_prepare() -> dict:
 	"""
 	Parse command-line arguments and prepare file paths.
@@ -400,6 +405,15 @@ def parse_and_prepare() -> dict:
 	if not os.path.isdir(image_folder):
 		os.mkdir(image_folder)
 
+	archive_root = "archive"
+	archive_assignment_dir = download_submission_images.get_archive_assignment_dir(
+		image_number, spec_dir
+	)
+	archive_images_dir = os.path.dirname(archive_assignment_dir)
+	archive_session_dir = os.path.dirname(archive_images_dir)
+	if not os.path.isdir(archive_assignment_dir):
+		os.makedirs(archive_assignment_dir)
+
 	# Construct file paths
 	config_yaml = os.path.join(spec_dir, f"protein_image_{image_number:02d}.yml")
 	input_csv_glob = glob.glob(os.path.join(
@@ -411,7 +425,7 @@ def parse_and_prepare() -> dict:
 	output_yml = os.path.join(folder, f"output-protein_image_{image_number:02d}.yml")
 	grades_csv = os.path.join(folder, f"blackboard_upload-protein_image_{image_number:02d}.csv")
 	student_ids_csv = os.path.join(data_dir, "current_students.csv")
-	image_hashes_yaml = os.path.join(data_dir, "image_hashes.yml")
+	image_hashes_yaml = os.path.join(archive_root, "image_hashes.yml")
 
 	params_dict = {
 		"args": args,
@@ -421,6 +435,10 @@ def parse_and_prepare() -> dict:
 		"run_dir": run_dir,
 		"folder": folder,
 		"image_folder": image_folder,
+		"archive_root": archive_root,
+		"archive_session_dir": archive_session_dir,
+		"archive_images_dir": archive_images_dir,
+		"archive_assignment_dir": archive_assignment_dir,
 		"config_yaml": config_yaml,
 		"input_csv": input_csv,
 		"output_csv": output_csv,
@@ -459,6 +477,7 @@ def display_info(params: dict):
 	table.add_row("Grades CSV", params["grades_csv"])
 	table.add_row("Student IDs CSV", params["student_ids_csv"])
 	table.add_row("Image Hashes", params["image_hashes_yaml"])
+	table.add_row("Archive Session", params["archive_session_dir"])
 
 	console.print(table)
 	time.sleep(1)
@@ -654,6 +673,12 @@ def process_data(student_tree: list, params: dict, read_only_config_dict: dict) 
 	postquestions_save_yaml = os.path.join(params["folder"], "post-questions_save.yml")
 	if time.time() - t0 > 4:
 		file_io_protein.backup_tree_to_yaml(postquestions_save_yaml, student_tree)
+
+	# Generate HTML for visual grading if enabled
+	if params["args"].make_html is True:
+		profiles_html = os.path.join(params["folder"], "profiles.html")
+		download_submission_images.write_html_from_student_tree(student_tree, profiles_html)
+		download_submission_images.open_html_in_browser(profiles_html)
 
 	# Loop through each student entry and process image questions
 	console.print("\nProcess Image Questions", style='green')
