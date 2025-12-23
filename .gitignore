@@ -2,6 +2,10 @@
 __pycache__/
 *.py[codz]
 *$py.class
+Protein_Images_Archive_Content
+data/inputs/current_students.csv
+data/runs/*
+!data/runs/.gitkeep
 
 # C extensions
 *.so

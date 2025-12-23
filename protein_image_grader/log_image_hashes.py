@@ -2,11 +2,11 @@
 
 # external python/pip modules
 import os
-import glob
 import yaml
-import hashlib
 import imagehash
 from PIL import Image
+
+import protein_image_grader.test_google_image as test_google_image
 
 def calculate_md5(image_path: str) -> str:
 	"""
@@ -22,9 +22,8 @@ def calculate_md5(image_path: str) -> str:
 	str
 		MD5 hash of the image's pixel data
 	"""
-	img = Image.open(image_path)
-	pixel_data = img.tobytes()
-	return hashlib.md5(pixel_data).hexdigest()
+	image_data = open(image_path, 'rb')
+	return test_google_image.calculate_md5(image_data)
 
 def calculate_phash(image_path: str, hash_size: int = 16) -> str:
 	"""
@@ -60,19 +59,25 @@ if __name__ == '__main__':
 	phash_dict = {}
 
 	# Iterate over each file in the images folder
-	image_files = glob.glob('ARCHIVE_IMAGES/BCHM_Prot_Img_*/*.*')
+	image_files = []
+	#image_files = glob.glob('ARCHIVE_IMAGES/BCHM_Prot_Img_*/*.*')
+	for root, dirs, files in os.walk('ARCHIVE_IMAGES/'):
+		for file in files:
+			full_path = os.path.join(root, file)
+			if os.path.isfile(full_path):  # Ensures it's a file, not a directory
+					image_files.append(full_path)
 	image_files.sort()
 	summarize_extensions(image_files)
 	for filepath in image_files:
 		filename = os.path.basename(filepath)
 		print(filepath)
 		# Calculate MD5 and pHash
-		md5_hash = calculate_md5(filepath)
-		perceptual_hash = calculate_phash(filepath, hash_size=16)
+		image_data = open(filepath, 'rb')
+		md5_hash, perceptual_hash = test_google_image.get_hash_data(image_data)
 
 		# Update the dictionaries
-		md5_dict[md5_hash] = filename
-		phash_dict[perceptual_hash] = filename
+		md5_dict[md5_hash] = filepath
+		phash_dict[perceptual_hash] = filepath
 
 	# Save the dictionaries to a YAML file
 	with open('image_hashes.yml', 'w') as f:

@@ -1,8 +1,6 @@
-face_recognition
 google-api-python-client
 google-auth
 imagehash
-numpy
 pillow
 pillow_heif
 py-applescript

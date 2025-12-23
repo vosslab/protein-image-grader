@@ -1,0 +1,1 @@
+"""Protein image grader package."""

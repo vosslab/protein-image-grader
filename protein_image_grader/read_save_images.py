@@ -3,12 +3,12 @@
 import os
 import sys
 import glob
-import commonlib
+import protein_image_grader.commonlib as commonlib
 from rich.console import Console
 from rich.style import Style
 from PIL import Image
-from tool_scripts import test_google_image
-from tool_scripts import student_id_protein
+import protein_image_grader.test_google_image as test_google_image
+import protein_image_grader.student_id_protein as student_id_protein
 
 console = Console()
 warning_color = Style(color="rgb(255, 187, 51)")  # RGB for bright orange

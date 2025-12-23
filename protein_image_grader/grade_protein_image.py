@@ -15,16 +15,17 @@ from rich.console import Console
 from rich.style import Style
 from rich.table import Table
 
-import process_images
-import file_io_protein
-import timestamp_tools
-import student_id_protein
+import protein_image_grader.duplicate_processing as duplicate_processing
+import protein_image_grader.file_io_protein as file_io_protein
+import protein_image_grader.interactive_image_criteria_class as interactive_image_criteria_class
+import protein_image_grader.read_save_images as read_save_images
+import protein_image_grader.student_id_protein as student_id_protein
+import protein_image_grader.timestamp_tools as timestamp_tools
 
 console = Console()
 warning_color = Style(color="rgb(255, 187, 51)" )  # RGB for bright orange
 question_color = Style(color="rgb(100, 149, 237)" )  # RGB for cornflower blue
 data_color = Style(color="rgb(187, 51, 255)" )  # RGB for purple
-
 
 #==========================================
 # Get List of Accepted Answers for a Given Question
@@ -348,7 +349,252 @@ assert test_entry['Final Score'] == '100.00'
 
 
 #==========================================
-def process_data(student_tree: list, read_only_config_dict: dict) -> None:
+#==========================================
+#==========================================
+def parse_args() -> None:
+	# Argument Parsing: Initialize the parser and add arguments
+	parser = argparse.ArgumentParser(
+		description="Process student answers from a CSV based on a given YAML config.")
+	parser.add_argument("-i", dest="image_number", type=int,
+		help="Protein Image Number", required=True)
+	parser.add_argument("-s", "--spec-dir", dest="spec_dir", type=str,
+		help="Assignment spec YAML directory", default="spec_yaml_files")
+	parser.add_argument("-d", "--data-dir", dest="data_dir", type=str,
+		help="Input data directory", default="data/inputs")
+	parser.add_argument("-o", "--run-dir", dest="run_dir", type=str,
+		help="Output run directory", default="data/runs")
+	parser.add_argument("-y", dest="yaml_backup_file", type=str,
+		help="Load backup data file", default=None)
+	# Parse the arguments into a Namespace object
+	args = parser.parse_args()
+	return args
+
+#============================================
+def parse_and_prepare() -> dict:
+	"""
+	Parse command-line arguments and prepare file paths.
+
+	Returns:
+		dict: Dictionary containing file paths and configuration values.
+	"""
+	args = parse_args()
+	image_number = args.image_number
+	spec_dir = args.spec_dir
+	data_dir = args.data_dir
+	run_dir = args.run_dir
+	if not os.path.isdir(spec_dir):
+		raise ValueError(f"Spec directory not found: {spec_dir}")
+	if not os.path.isdir(data_dir):
+		raise ValueError(f"Data directory not found: {data_dir}")
+	if not os.path.isdir(run_dir):
+		os.makedirs(run_dir)
+
+	folder = os.path.join(run_dir, f"IMAGE_{image_number:02d}")
+	# Ensure the folder exists
+	if not os.path.isdir(folder):
+		os.mkdir(folder)
+
+	current_year = time.localtime().tm_year
+	image_folder = os.path.join(run_dir, f"DOWNLOAD_{image_number:02d}_year_{current_year:04d}")
+	# Ensure the folder exists
+	if not os.path.isdir(image_folder):
+		os.mkdir(image_folder)
+
+	# Construct file paths
+	config_yaml = os.path.join(spec_dir, f"protein_image_{image_number:02d}.yml")
+	input_csv_glob = glob.glob(os.path.join(
+		folder, f"BCHM_Prot_Img_{image_number:02d}-*.csv"))
+	if len(input_csv_glob) < 1:
+		raise ValueError(f"Input CSV not found in {folder}")
+	input_csv = input_csv_glob.pop()
+	output_csv = os.path.join(folder, f"output-protein_image_{image_number:02d}.csv")
+	output_yml = os.path.join(folder, f"output-protein_image_{image_number:02d}.yml")
+	grades_csv = os.path.join(folder, f"blackboard_upload-protein_image_{image_number:02d}.csv")
+	student_ids_csv = os.path.join(data_dir, "current_students.csv")
+	image_hashes_yaml = os.path.join(data_dir, "image_hashes.yml")
+
+	params_dict = {
+		"args": args,
+		"image_number": image_number,
+		"spec_dir": spec_dir,
+		"data_dir": data_dir,
+		"run_dir": run_dir,
+		"folder": folder,
+		"image_folder": image_folder,
+		"config_yaml": config_yaml,
+		"input_csv": input_csv,
+		"output_csv": output_csv,
+		"output_yml": output_yml,
+		"grades_csv": grades_csv,
+		"student_ids_csv": student_ids_csv,
+		"image_hashes_yaml": image_hashes_yaml
+	}
+
+	display_info(params_dict)
+	return params_dict
+
+#============================================
+
+def display_info(params: dict):
+	"""
+	Display relevant file information in a formatted table.
+
+	Args:
+		params (dict): Dictionary containing file paths and image number.
+	"""
+	global console
+	table = Table(show_header=True, header_style="bold magenta")
+
+	table.add_column("Name", style="dim", width=20)
+	table.add_column("Value", justify="left")
+
+	table.add_row("Spec Dir", params["spec_dir"])
+	table.add_row("Data Dir", params["data_dir"])
+	table.add_row("Run Dir", params["run_dir"])
+	table.add_row("Image Number", str(params["image_number"]))
+	table.add_row("Config YAML", params["config_yaml"])
+	table.add_row("Input CSV", params["input_csv"])
+	table.add_row("Output CSV", params["output_csv"])
+	table.add_row("Output YML", params["output_yml"])
+	table.add_row("Grades CSV", params["grades_csv"])
+	table.add_row("Student IDs CSV", params["student_ids_csv"])
+	table.add_row("Image Hashes", params["image_hashes_yaml"])
+
+	console.print(table)
+	time.sleep(1)
+
+#============================================
+
+def validate_questions(read_only_config: dict):
+	"""
+	Check for duplicate CSV columns in YAML configuration.
+
+	Args:
+		read_only_config (dict): Dictionary containing YAML configuration.
+	"""
+	used_csv_columns = {}
+	global console
+
+	for question_dict in read_only_config['csv_questions']:
+		csv_column = question_dict['csv_column']
+		if csv_column in used_csv_columns:
+			console.print(f"CSV Column {csv_column} used for more than one question!")
+			console.print(used_csv_columns[csv_column])
+			console.print(question_dict['name'])
+			raise ValueError
+		used_csv_columns[csv_column] = question_dict['name']
+
+#============================================
+
+def load_yaml_config(params: dict) -> dict:
+	"""
+	Load and validate YAML configuration.
+
+	Args:
+		params (dict): Dictionary containing file paths and image number.
+
+	Returns:
+		dict: Read-only dictionary of YAML config.
+	"""
+	# Read the YAML file
+	with open(params["config_yaml"], 'r') as f:
+		config = yaml.safe_load(f)
+
+	# Convert config to read-only dictionary
+	read_only_config = MappingProxyType(config)
+	global console
+
+	# Validate image number
+	if read_only_config['image number'] != params["image_number"]:
+		console.print(
+			f"Image numbers do not match: {read_only_config['image number']} != {params['image_number']}"
+		)
+		raise ValueError("Image number mismatch in YAML file.")
+
+	# Validate keys in config tree
+	student_id_protein.validate_dict_keys_in_tree(
+		read_only_config['image_questions'],
+		('name', 'point_deduction', 'feedback', 'type')
+	)
+	student_id_protein.validate_dict_keys_in_tree(
+		read_only_config['csv_questions'],
+		('name', 'csv_column', 'type')
+	)
+
+	console.print(f"{read_only_config['assignment name']} worth {read_only_config['total points']} points")
+
+	validate_questions(read_only_config)
+
+	return read_only_config
+
+#============================================
+
+def load_student_data(params: dict, read_only_config: dict) -> tuple:
+	"""
+	Load student data from CSV or backup YAML.
+
+	Args:
+		params (dict): Dictionary containing file paths.
+		read_only_config (dict): YAML configuration.
+
+	Returns:
+		tuple: (student_tree, student_ids_tree)
+	"""
+	# Load from YAML backup if provided
+	t0 = time.time()
+	if params["args"].yaml_backup_file:
+		with open(params["args"].yaml_backup_file, 'r') as f:
+			student_tree = yaml.safe_load(f)
+	else:
+		student_tree = file_io_protein.read_student_csv_data(params["input_csv"], read_only_config)
+
+	# Quick timestamp check
+	timestamp_tools.check_due_date(student_tree[-1]['timestamp'], read_only_config)
+
+	# Load student IDs
+	student_ids_tree = file_io_protein.read_student_ids(params["student_ids_csv"])
+	student_id_protein.match_lists_and_add_student_ids(student_ids_tree, student_tree)
+
+	#back up matched students
+	match_yaml = os.path.join(params["folder"], "matched_students.yml")
+	if time.time() - t0 > 4:
+		file_io_protein.backup_tree_to_yaml(match_yaml, student_tree)
+
+	return student_tree, student_ids_tree
+
+#============================================
+
+def process_and_save(params: dict, student_tree: list, read_only_config: dict):
+	"""
+	Process student data and save output files.
+
+	Args:
+		params (dict): Dictionary containing file paths.
+		student_tree (list): List of student data.
+		read_only_config (dict): YAML configuration.
+	"""
+	try:
+		process_data(student_tree, params, read_only_config)
+	except Exception as e:
+		# Backup crash data
+		file_io_protein.write_output_file("crash_data.csv", student_tree)
+		file_io_protein.backup_tree_to_yaml("crash_data.yml", student_tree)
+
+		# Print error message
+		traceback.print_exc()
+		print(f"Error processing: {e}")
+		sys.exit(1)
+
+	# Write processed data to output files
+	file_io_protein.write_output_file(params["output_csv"], student_tree)
+	file_io_protein.backup_tree_to_yaml(params["output_yml"], student_tree)
+	file_io_protein.write_student_grades_for_upload(
+		read_only_config['assignment name'], params["grades_csv"], student_tree
+	)
+
+
+#==========================================
+def process_data(student_tree: list, params: dict, read_only_config_dict: dict) -> None:
 	"""
 	Processes student data and updates the student_tree based on the configuration settings.
 
@@ -364,16 +610,32 @@ def process_data(student_tree: list, read_only_config_dict: dict) -> None:
 	None
 		Updates the student_tree list in-place.
 	"""
+	global console
+	t0 = time.time()
 	console.print("\nPre-Processing Student Images", style=data_color)
-	process_images.pre_process_student_images(student_tree)
+	console.print("\nDownloading and Reading Student Images", style=data_color)
+	read_save_images.read_and_save_student_images(student_tree, params)
+	# Save backup of the student_tree
+	download_save_yaml = os.path.join(params["folder"], "downloaded_images.yml")
+	if time.time() - t0 > 4:
+		file_io_protein.backup_tree_to_yaml(download_save_yaml, student_tree)
+
+	console.print("\nChecking Student Images for Duplicates", style=data_color)
+	duplicate_processing.check_duplicate_images(student_tree, params)
+	# Save backup of the student_tree
+	duplicate_check_save_yaml = os.path.join(params["folder"], "duplicate_check_save.yml")
+	if time.time() - t0 > 4:
+		file_io_protein.backup_tree_to_yaml(duplicate_check_save_yaml, student_tree)
 
 	# Loop through each student entry and process timestamp due dates
 	console.print("\nPre-Processing Turn In Date", style=data_color)
 	for student_entry in student_tree:
 		timestamp_tools.timestamp_due_date(student_entry, read_only_config_dict)
 
-	# Temporary backup of the student_tree
-	file_io_protein.backup_tree_to_yaml("temp_save.yml", student_tree)
+	# Save backup of the student_tree
+	preprocess_save_yaml = os.path.join(params["folder"], "preprocess_save.yml")
+	if time.time() - t0 > 4:
+		file_io_protein.backup_tree_to_yaml(preprocess_save_yaml, student_tree)
 
 	# Loop through questions in read_only_config_dict and process each CSV question
 	console.print("\nProcess CSV Questions", style='green')
@@ -388,16 +650,20 @@ def process_data(student_tree: list, read_only_config_dict: dict) -> None:
 		# Process each student entry for the given CSV question
 		process_csv_question(student_tree, question_dict, accepted_answers)
 
-	# Another temporary backup
-	file_io_protein.backup_tree_to_yaml("temp_save.yml", student_tree)
+	# Save backup of the student_tree
+	postquestions_save_yaml = os.path.join(params["folder"], "post-questions_save.yml")
+	if time.time() - t0 > 4:
+		file_io_protein.backup_tree_to_yaml(postquestions_save_yaml, student_tree)
 
 	# Loop through each student entry and process image questions
 	console.print("\nProcess Image Questions", style='green')
-	proc_img = process_images.process_image_questions_class(student_tree, read_only_config_dict)
+	proc_img = interactive_image_criteria_class.process_image_questions_class(student_tree, read_only_config_dict)
 	proc_img.process_all_student_images()
 
-	# Another temporary backup
-	file_io_protein.backup_tree_to_yaml("temp_save.yml", student_tree)
+	# Save backup of the student_tree
+	postimages_save_yaml = os.path.join(params["folder"], "post-images_save.yml")
+	if time.time() - t0 > 4:
+		file_io_protein.backup_tree_to_yaml(postimages_save_yaml, student_tree)
 
 	# Calculate the final score for each student entry
 	console.print("\nCalculating Final Scores")
@@ -405,125 +671,25 @@ def process_data(student_tree: list, read_only_config_dict: dict) -> None:
 		get_final_score(student_entry, read_only_config_dict)
 	console.print('DONE Processing Data\n\n')
 
+#============================================
 
-#==========================================
-#==========================================
-#==========================================
-def main() -> None:
+def main():
 	"""
-	Main function to drive the script for processing student answers based on a YAML config.
+	Main function to parse arguments and process the CSV file.
 	"""
+	# Prepare file paths and other paramters
+	params = parse_and_prepare()
 
-	# Argument Parsing: Initialize the parser and add arguments
-	parser = argparse.ArgumentParser(description="Process student answers from a CSV based on a given YAML config.")
-	parser.add_argument("-i", dest="image_number", type=int, help="Protein Image Number", required=True)
-	parser.add_argument("-y", dest="yaml_backup_file", type=str, help="Load backup data file", default=None)
+	# Read the the YAML_files/protein_image_xx.yml file
+	read_only_config = load_yaml_config(params)
 
-	# Parse the arguments into a Namespace object
-	args = parser.parse_args()
+	# read student data and match submitted names to the roster
+	student_tree, student_ids_tree = load_student_data(params, read_only_config)
 
+	#final step must be doing a lot (!)
+	process_and_save(params, student_tree, read_only_config)
 
+#============================================
 
-	# Extract image number and construct file names based on it
-	image_number = args.image_number
-	folder = f"IMAGE_{image_number:02d}"
-	#print(folder)
-	if not os.path.isdir(folder):
-		os.mkdir(folder)
-
-	config_yaml = f"YAML_files/protein_image_{image_number:02d}.yml"
-	#print(config_yaml)
-	input_csv_glob = glob.glob(f"{folder}/BCHM_Prot_Img_{image_number:02d}-*.csv")
-	#print(input_csv_glob)
-	input_csv = input_csv_glob.pop()
-	output_csv = f"{folder}/output-protein_image_{image_number:02d}.csv"
-	output_yml = f"{folder}/output-protein_image_{image_number:02d}.yml"
-	grades_csv = f"{folder}/blackboard_upload-protein_image_{image_number:02d}.csv"
-	student_ids_csv = "current_students.csv"
-
-	# Directly print the variables
-	console = Console()
-	table = Table(show_header=True, header_style="bold magenta")
-
-	# Add columns
-	table.add_column("Name", style="dim", width=20)
-	table.add_column("Value", justify="left", style=data_color)
-
-	# Add rows
-	table.add_row("Image Number", str(image_number))
-	table.add_row("Config YAML", config_yaml)
-	table.add_row("Input CSV", input_csv)
-	table.add_row("Output CSV", output_csv)
-	table.add_row("Output YML", output_yml)
-	table.add_row("Grades CSV", grades_csv)
-	table.add_row("Student IDs CSV", student_ids_csv)
-
-	# Print the table
-	console.print(table)
-	time.sleep(1)
-
-	# Load YAML config: Open and read YAML file
-	with open(config_yaml, 'r') as f:
-		config = yaml.safe_load(f)
-		read_only_config_dict = MappingProxyType(config)
-
-	# Validate if the image numbers in the YAML file and arguments match
-	if read_only_config_dict['image number'] != image_number:
-		console.print(f"image numbers do not match, check YAML file {read_only_config_dict['image number']} != {image_number}")
-		sys.exit(1)
-
-	# Validate keys in read_only_config_dict trees
-	student_id_protein.validate_dict_keys_in_tree(read_only_config_dict['image_questions'], ('name', 'point_deduction', 'feedback', 'type'))
-	student_id_protein.validate_dict_keys_in_tree(read_only_config_dict['csv_questions'], ('name', 'csv_column', 'type'))
-	console.print(f"{read_only_config_dict['assignment name']} worth {read_only_config_dict['total points']} points")
-
-	# make sure columns are not used twice
-	used_csv_columns = {}
-	for question_dict in read_only_config_dict['csv_questions']:
-		csv_column = question_dict['csv_column']
-		if used_csv_columns.get(csv_column, None) is not None:
-			console.print(f"CSV Column {csv_column} used for more than one question!")
-			console.print(used_csv_columns[csv_column])
-			console.print(question_dict['name'])
-			sys.exit(1)
-		used_csv_columns[csv_column] = question_dict['name']
-
-	# Read student data from CSV files and load into trees
-	if args.yaml_backup_file is not None:
-		with open(args.yaml_backup_file, 'r') as f:
-			student_tree = yaml.safe_load(f)
-	else:
-		student_tree = file_io_protein.read_student_csv_data(input_csv, read_only_config_dict)
-	# quick check
-	timestamp_tools.check_due_date(student_tree[-1]['timestamp'], read_only_config_dict)
-
-	student_ids_tree = file_io_protein.read_student_ids(student_ids_csv)
-	student_id_protein.match_lists_and_add_student_ids(student_ids_tree, student_tree)
-
-	# Process data: Perform the main data processing steps
-	try:
-		process_data(student_tree, read_only_config_dict)
-	except Exception as e:
-		# In case of an exception, backup the data to a crash file
-		file_io_protein.write_output_file("crash_data.csv", student_tree)
-		file_io_protein.backup_tree_to_yaml("crash_data.yml", student_tree)
-
-		# Print the full traceback
-		traceback.print_exc()
-
-		# Print the error message
-		console.print(f"Error processing: {e}")
-
-		# Exit the script
-		sys.exit(1)
-
-	# Write processed data to output files
-	file_io_protein.write_output_file(output_csv, student_tree)
-	file_io_protein.backup_tree_to_yaml(output_yml, student_tree)
-	file_io_protein.write_student_grades_for_upload(read_only_config_dict['assignment name'], grades_csv, student_tree)
-
-# Run the main function if the script is executed
-if __name__ == "__main__":
+if __name__ == '__main__':
 	main()
-
-

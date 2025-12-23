@@ -1,1 +1,0 @@
-/Users/vosslab/nsh/junk-drawer/teaching_scripts/test_google_image.py

@@ -1,0 +1,52 @@
+
+
+image_questions:
+    - name: "Image was received"
+      type: bool
+      point_deduction: -2
+      feedback: 'no image submitted'
+
+    - name: "Image is a protein structure."
+      type: bool
+      point_deduction: -2
+      feedback: 'the assignment is to use the UCSF Chimera program to create an image of a protein structure. Please watch the YouTube videos to better understand the assignment.'
+
+    - name: "Protein PDB ID is correct"
+      type: bool
+      point_deduction: -2
+      feedback: 'This protein was not the one that was assigned, be sure to use the correct PDB id.'
+
+    - name: "White background was used"
+      type: bool
+      point_deduction: -1
+      feedback: 'one of the main criteria is to have a white background, try using Preset->Publication 1 for an easy fix.'
+
+    - name: "Crisp edges, no green halo from selection tool"
+      type: bool
+      point_deduction: 0
+      feedback: 'next time try to de-select all atoms before taking the image or you get a green halo'
+
+    - name: "Protein fills entire frame; it is not too small"
+      type: bool
+      point_deduction: 0
+      feedback: 'your protein image does not fill the image, next time zoom in to fill the image and avoid too much white space.'
+
+    - name: "Entire protein is visible, nothing is cut off or missing."
+      type: bool
+      point_deduction: 0
+      feedback: 'your protein image is zoomed in too far and it is cutting off important details, zoom out more next time.'
+
+    - name: "File type is PNG, not JPEG or something else"
+      type: bool
+      point_deduction: -0.1
+      feedback: 'The assignment is to export the image as a PNG file. Watch the YouTube videos again for the how-to.'
+
+    - name: "PNG image export was used, not a screenshot"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'It looks like you used a screen shot instead of exporting the image, the assignment to export the image it is of higher quality. Watch the YouTube videos again for the how-to.'
+
+    - name: "Unique image, not same as another student"
+      type: bool
+      point_deduction: 0.0
+      feedback: 'It appears that you uploaded the exact same image as another student. While you are welcome to work with other students, you must create your own independent image. Next time you will lose points'

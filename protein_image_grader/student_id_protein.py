@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.style import Style
 from rich.text import Text
 
-from tool_scripts import roster_matching
+import protein_image_grader.roster_matching as roster_matching
 
 console = Console()
 warning_color = Style(color="rgb(255, 187, 51)" )  # RGB for bright orange

@@ -1,0 +1,154 @@
+
+image number: 6
+assignment name: 'Protein Image 6: 3HDL'
+total points: 5
+strict background: true
+
+meta columns:
+  First Name: 3
+  Last Name: 4
+  Student ID: 5
+  email: 2
+  timestamp: 1
+  image url: 6
+  extra description: 12
+
+#hide columns: [9, 10, 11]
+
+deadline:
+    due date: Mar 27, 2025
+    numeric_deductions: # in hours
+        0-12: 0
+        12-36: -0.1
+        36-99: -0.2
+        99-: -0.4
+
+csv_questions:
+    - name: "Protein Common Name"
+      csv_column: 7 #note starts at column 1, not 0
+      type: str
+      answers: [ 'Peroxidase', 'glycosylatedperoxidase', 'peroxidase', ]
+      glob wrong responses:
+        '*3hdl*':
+            point_deduction: -0.4
+            feedback: 'please enter common name; not the PDB id. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*tree*':
+            point_deduction: -0.1
+            feedback: 'The organism name is not part of the enzyme name. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*nose*':
+            point_deduction: -0.2
+            feedback: 'any bound ligands like sugars are not part of the enzyme name. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*oxidoreductase*':
+            point_deduction: -0.2
+            feedback: 'Please provice the common enzyme name, not its classification. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*':
+            point_deduction: -0.2
+            feedback: 'Peroxidases are a large group of enzymes which commonly break up peroxides. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+
+    - name: "Enzyme Commission (EC) class"
+      csv_column: 8 #note starts at column 1, not 0
+      type: mc
+      answer: '(1) Oxidoreductases'
+      point_deduction: -0.2
+      feedback: 'this enzyme catalyzes oxidation-reduction (redox) reactions.'
+
+
+    - name: "Number of oligosaccharide chains"
+      csv_column: 9 #note starts at column 1, not 0
+      type: int
+      answer: 6
+      numeric_deductions:
+            0-1: -0.4
+            2-3: -0.3
+            4-4: -0.2
+            5-5: -0.1
+            7-8: -0.2
+            9-15: -0.3
+            16-: -0.4
+      feedback: "chains: B, C, D, E, F, and G = 6 chains"
+
+    - name: "Total number of monosaccharides"
+      csv_column: 10 #note starts at column 1, not 0
+      type: int
+      answer: 26
+      numeric_deductions:
+            0-23: -0.3
+            23-23: -0.2
+            24-25: -0.1
+            27-28: -0.1
+            29-: -0.3
+      feedback: "7 + 5 + 2x3 + 2 + 6 = 26 monosaccharides"
+
+    - name: "Product from hydrogen peroxide catalysis"
+      csv_column: 11 #note starts at column 1, not 0
+      type: str
+      answers: ['water', 'oxygen', 'watero2', 'water+o2',]
+      auto wrong responses: [peroxidase, hydronium, hydrogen,]
+      glob wrong responses:
+            'h2o':
+                point_deduction: 0.0
+                feedback: 'I did ask for the name, not the chemical formula.'
+            '*':
+                point_deduction: -0.2
+                feedback: 'this enzyme produces water and oxygen from hydrogen peroxide.'
+
+image_questions:
+    - name: "Image was received"
+      type: bool
+      point_deduction: -1
+      feedback: 'no image submitted'
+
+    - name: "Protein PDB ID is correct"
+      type: bool
+      point_deduction: -3
+      feedback: 'this protein was not the one that was assigned, be sure to use the correct for ths protein image. Most often students upload the image from a previous assignment.'
+
+    - name: "Bulk of protein is colored light blue"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'Part of the assignment was to color the protein light cyan/blue. Your image does not have a blue protein.'
+
+    - name: "Protein surface is shown"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'Part of the assignment was to show the surface of the protein. It is one of the menu options.'
+
+    - name: "Sugars are visible."
+      type: bool
+      point_deduction: -0.3
+      feedback: 'Part of the assignment was to color all of the sugar molecules red. I could not see the sugars in your image.'
+
+    - name: "Sugars are colored red"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'Part of the assignment was to color all of the sugar molecules red.'
+
+    - name: "White background was used"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'one of the main criteria is to have a white background, try using Preset->Publication 1 for an easy fix.'
+
+    - name: "Crisp edges, no green halo from selection tool"
+      type: bool
+      point_deduction: 0
+      feedback: 'next time try to de-select all atoms before taking the image or you get a green halo'
+
+    - name: "Zoom level is good, not too small"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'your protein image does not fill the image, next time zoom in to fill the image and avoid too much white space.'
+
+    - name: "Zoom level is good, entire protein fits in frame and not cutoff"
+      type: bool
+      point_deduction: 0
+      feedback: 'your protein image is zoomed in too far and it is cutting off important details, zoom out more next time.'
+
+    - name: "File type is PNG, not JPEG or something else"
+      type: bool
+      point_deduction: -0.1
+      feedback: 'The assignment is to export the image as a PNG file. Watch the YouTube videos again for the how-to.'
+
+    - name: "PNG image export was used, not a screenshot"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'it looks like you used a screen shot instead of exporting the image, the assignment to export the image it is of higher quality. Watch the YouTube videos again for the how-to.'

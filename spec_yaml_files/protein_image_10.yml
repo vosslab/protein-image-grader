@@ -1,0 +1,147 @@
+
+image number: 10
+assignment name: 'Protein Image 10: 1PPI'
+total points: 5
+strict background: true
+
+meta columns:
+  First Name: 3
+  Last Name: 4
+  Student ID: 5
+  email: 2
+  timestamp: 1
+  image url: 6
+  extra description: 13
+
+#hide columns: [9, 10, 11]
+
+deadline:
+    due date: May 1, 2025
+    numeric_deductions: # in hours
+        0-12: 0
+        12-36: -0.1
+        36-99: -0.2
+        99-: -0.4
+
+csv_questions:
+    - name: "Protein Common Name"
+      csv_column: 7 #note starts at column 1, not 0
+      type: str
+      answers: [ 'Amylase', 'amylase', 'alphaamylase',  ]
+      glob wrong responses:
+        '*1ppi*':
+            point_deduction: -0.4
+            feedback: 'please enter common name; not the PDB id. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*mammalian*':
+            point_deduction: -0.2
+            feedback: 'The organism name is not part of the enzyme name. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*pancreatic*':
+            point_deduction: -0.2
+            feedback: 'The organ source name is not part of the enzyme name. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*carbohydrate*':
+            point_deduction: -0.2
+            feedback: 'any bound ligands like carbohydrates are not part of the enzyme name. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*':
+            point_deduction: -0.2
+            feedback: 'Amylase is an enzyme that catalyses the hydrolysis of starch into sugars. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+
+    - name: "Enzyme Commission (EC) class"
+      csv_column: 8 #note starts at column 1, not 0
+      type: mc
+      answer: '(3) Hydrolases'
+      point_deduction: -0.2
+      feedback: 'this enzyme breaks down carbohydrates using water to cut the bonds.'
+
+    - name: "Role of Amylase"
+      csv_column: 9 #note starts at column 1, not 0
+      type: mc
+      answer: 'Breaks starch chains into smaller pieces with two or three glucose units'
+      point_deduction: -0.2
+      feedback: 'this enzyme breaks starch chains into smaller pieces with two or three glucose units.'
+
+    - name: "Reason for fungal glucoamylase"
+      csv_column: 10 #note starts at column 1, not 0
+      type: mc
+      answer: 'It can break down starch into individual glucose units'
+      point_deduction: -0.2
+      feedback: 'Glucoamylase is widely used in the food processing industry for conversion of starch into glucose'
+
+    - name: "Two locations of amylase"
+      csv_column: 11 #note starts at column 1, not 0
+      type: ma
+      answer: 'Pancreas;Saliva'
+      point_deduction: -0.2
+      feedback: 'Amylase is a digestive enzyme predominantly secreted by the pancreas and salivary glands.'
+
+    - name: "Two active site ions"
+      csv_column: 12 #note starts at column 1, not 0
+      type: ma
+      answer: 'Chloride (Cl;Calcium (Ca'
+      point_deduction: -0.2
+      feedback: 'Amylase is a digestive enzyme predominantly secreted by the pancreas and salivary glands.'
+
+image_questions:
+    - name: "Image was received"
+      type: bool
+      point_deduction: -1
+      feedback: 'no image submitted'
+
+    - name: "Protein PDB ID is correct"
+      type: bool
+      point_deduction: -3
+      feedback: 'this protein was not the one that was assigned, be sure to use the correct for ths protein image. Most often students upload the image from a previous assignment.'
+
+    - name: "the starch substrate has a bright color"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'Part of the assignment was to color the starch substrate a bright color. Your image did not have this.'
+
+    - name: "both starch substrates have a bright color"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'Part of the assignment was to color both of the starch substrate a bright color. Your image only had one strach colored.'
+
+    - name: "only starch substrates have a bright color and not something else"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'Part of the assignment was to color both of the starch substrate a bright color. Your image only had something else colored brightly.'
+
+    - name: "the bright colored ligand stands out from the protein"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'Part of the assignment was to color the starch ligand a bright color so that it stands out from the protein. While your image may have a bright colored starch ligand, it does not stand out.'
+
+    - name: "White background was used"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'one of the main criteria is to have a white background, try using Preset->Publication 1 for an easy fix.'
+
+    - name: "Crisp edges, no green halo from selection tool"
+      type: bool
+      point_deduction: 0
+      feedback: 'next time try to de-select all atoms before taking the image or you get a green halo'
+
+    - name: "Protein fills entire frame; it is not too small"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'your protein image does not fill the image, next time zoom in to fill the image and avoid too much white space.'
+
+    - name: "Entire protein is visible, nothing is cut off or missing."
+      type: bool
+      point_deduction: 0
+      feedback: 'your protein image is zoomed in too far and it is cutting off important details, zoom out more next time.'
+
+    - name: "File type is PNG, not JPEG or something else"
+      type: bool
+      point_deduction: -0.1
+      feedback: 'The assignment is to export the image as a PNG file. Watch the YouTube videos again for the how-to.'
+
+    - name: "PNG image export was used, not a screenshot"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'it looks like you used a screen shot instead of exporting the image, the assignment to export the image it is of higher quality. Watch the YouTube videos again for the how-to.'
+
+    - name: "Unique image, not same as another student"
+      type: bool
+      point_deduction: 0.0
+      feedback: 'It appears that you uploaded the exact same image as another student. While you are welcome to work with other students, you must create your own independent image. Next time you will lose points'

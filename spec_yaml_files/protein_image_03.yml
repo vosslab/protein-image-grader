@@ -1,0 +1,157 @@
+
+image number: 3
+assignment name: 'Protein Image 3: 3NQ3'
+total points: 5
+strict background: true
+
+meta columns:
+  First Name: 3
+  Last Name: 4
+  Student ID: 5
+  email: 2
+  timestamp: 1
+  image url: 6
+  extra description: 11
+
+#hide columns: [9, 10, 11]
+
+deadline:
+    due date: Feb 27, 2025
+    numeric_deductions: # in hours
+        0-12: 0
+        12-36: -0.1
+        36-99: -0.2
+        99-199: -0.4
+        199-: -1.0
+
+csv_questions:
+  - name: "Protein Common Name"
+    csv_column: 7 #note starts at column 1, not 0
+    type: str
+    answers: ['Beta-Lactoglobulin', 'betalactoglobulin', 'blactoglobulin',]
+    auto wrong responses: [beta3, ]
+    glob wrong responses:
+        '*3nq3*':
+            point_deduction: -0.4
+            feedback: 'please enter common name; not the PDB id. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*bovine*':
+            point_deduction: -0.1
+            feedback: 'The organism name is not part of the enzyme name. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*capricacid*':
+            point_deduction: -0.2
+            feedback: 'any bound ligands like capric acid is not part of the enzyme name. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*transportprotein*':
+            point_deduction: -0.2
+            feedback: 'Please provice the common enzyme name, not its classification. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*':
+            point_deduction: -0.2
+            feedback: 'The name Beta-Lactoglobulin is a globular transport protein. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+
+  - name: "Year of Publication"
+    csv_column: 8 #note starts at column 1, not 0
+    type: int
+    numeric_deductions:
+        2009-2011: -0.1
+        0-2008: -0.2
+        2012-2020: -0.2
+        2020-: -0.3
+    answer: 2010
+
+  - name: "Number of Alpha Helices"
+    csv_column: 9 #note starts at column 1, not 0
+    type: int
+    numeric_deductions:
+        0-1: -0.3
+        2-3: -0.2
+        4-4: -0.1
+        6-8: -0.2
+        9-15: -0.3
+        16-: -0.4
+    answer: 5
+
+  - name: "Item at the Grocery Store"
+    csv_column: 10 #note starts at column 1, not 0
+    type: str
+    answers: ['milk', 'cowmilk', 'whey', 'wheyprotein', 'cheese', 'dairy']
+    auto wrong responses: ['meat', 'chicken']
+    glob wrong responses:
+        '*':
+            point_deduction: -0.2
+            feedback: 'The lacto- prefix of the enzyme name should imply lactose and thus a milk protein'
+
+image_questions:
+
+    - name: "Image was received"
+      type: bool
+      point_deduction: -3.0
+      feedback: 'no image submitted'
+
+    - name: "Protein PDB ID is correct"
+      type: bool
+      point_deduction: -2
+      feedback: 'this protein was not the one that was assigned, be sure to use the correct for ths protein image. Most often students upload the image from a previous assignment.'
+
+    - name: "Hydrophobic amino acids are colored yellow"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'Part of the assignment was to color all hydrophobic amino acids yellow. Your image did not show yellow as expected. Rewatch the video to get a better grasp of the concept.'
+
+    - name: "Charged amino acids are colored blue/red"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'Part of the assignment was to color all charged amino acids red of negative and blue for positive. Your image did not show colors as expected. Rewatch the video to get a better grasp of the concept.'
+
+    - name: "Neutral polar amino acids are colored gray"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'Part of the assignment was to color all neutral polar amino acids gray. Your image did not show gray as expected. Rewatch the video to get a better grasp of the concept.'
+
+    - name: "Protein was sliced and interior is visible"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'the main component of this protein image was to slice the protein so we could so it is hydrophobic amino acids in the middle. Rewatch the video to get a better grasp of the concept.'
+
+    - name: "Protein was sliced correctly, not too much or too little"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'the main component of this protein image was to slice the protein so we could so it is hydrophobic amino acids in the middle. It looks like your sliced too much or too little to accurately see the interior.'
+
+    - name: "Protein slicing is clean, no weird artifacts in slicing"
+      type: bool
+      point_deduction: -0.1
+      feedback: 'the main component of this protein image was to slice the protein so we could so it is hydrophobic amino acids in the middle. There is something not quite right with your image.'
+
+    - name: "White background was used"
+      type: bool
+      point_deduction: -0.5
+      feedback: 'one of the main criteria is to have a white background, try using Preset->Publication 1 for an easy fix.'
+
+    - name: "Crisp edges, no green halo from selection tool"
+      type: bool
+      point_deduction: -0.1
+      feedback: 'next time try to de-select all atoms before taking the image or you get a green halo'
+
+    - name: "Zoom level is good, not too small"
+      type: bool
+      point_deduction: -0.1
+      feedback: 'your protein image does not fill the image, next time zoom in to fill the image and avoid too much white space.'
+
+    - name: "Zoom level is good, entire protein fits in frame"
+      type: bool
+      point_deduction: -0.1
+      feedback: 'your protein image is zoomed in too far and it is cutting off important details, zoom out more next time.'
+
+    - name: "File type is PNG, not JPEG or something else"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'The assignment is to export the image as a PNG file. Watch the YouTube videos again for the how-to.'
+
+    - name: "PNG image export was used, not a screenshot"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'it looks like you used a screen shot instead of exporting the image, the assignment to export the image it is of higher quality. Watch the YouTube videos again for the how-to.'
+
+    - name: "Unique image, not same as another student"
+      type: bool
+      point_deduction: -3.5
+      feedback: 'It appears that you uploaded the exact same image as another student. While you are welcome to work with other students, you must create your own independent image. Next time you will lose even more points.'

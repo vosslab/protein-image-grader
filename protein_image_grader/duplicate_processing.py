@@ -4,7 +4,7 @@ from rich.console import Console
 from rich.style import Style
 from collections import defaultdict
 
-from tool_scripts import student_id_protein
+import protein_image_grader.student_id_protein as student_id_protein
 
 console = Console()
 warning_color = Style(color="rgb(255, 187, 51)")  # RGB for bright orange
@@ -42,6 +42,10 @@ def load_image_hashes(file_path: str = 'image_hashes.yml') -> dict:
 				value: a LIST of filenames to compare
 	so local maintains a list, whereas a image_hash
 	"""
+
+	if not os.path.isfile(file_path):
+		console.print(f"WARNING: image hashes file not found: {file_path}", style=warning_color)
+		return {'md5': {}, 'phash': {}}
 
 	with open(file_path, 'r') as f:
 		image_hashes = yaml.safe_load(f)
@@ -293,7 +297,8 @@ def check_duplicate_images(student_tree: list, params: dict):
 	console.print("\nFind EXACT local duplicates", style=data_color)
 	find_exact_local_duplicates(student_tree, local_image_hashes)
 
-	image_hashes = load_image_hashes()
+	image_hashes_yaml = params.get('image_hashes_yaml', 'image_hashes.yml')
+	image_hashes = load_image_hashes(image_hashes_yaml)
 	console.print("\nFind EXACT global duplicates", style=data_color)
 	find_exact_global_duplicates(student_tree, image_hashes)
 

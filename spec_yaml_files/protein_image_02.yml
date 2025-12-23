@@ -1,0 +1,180 @@
+
+image number: 2
+assignment name: 'Protein Image 2: 1HTB'
+total points: 5
+strict background: true
+
+meta columns:
+  First Name: 3
+  Last Name: 4
+  Student ID: 5
+  email: 2
+  timestamp: 1
+  image url: 6
+
+hide columns: [6, 9, 10, 11]
+
+deadline:
+    due date: Feb 13, 2025
+    numeric_deductions: # in hours
+        0-12: 0
+        12-36: -0.1
+        36-99: -0.2
+        99-: -0.4
+
+csv_questions:
+  - name: "Protein Common Name"
+    csv_column: 7 #note starts at column 1, not 0
+    type: str
+    answers: ['Alcohol Dehydrogenase', 'beta3alcoholdehydrogenase', 'alcoholdehydrogenase', 'alcoholdehydrogenasebeta3']
+    auto wrong responses: [beta3, ]
+    glob wrong responses:
+        '*1htb*':
+            point_deduction: -0.4
+            feedback: 'Please enter common name; not the PDB id. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*oxidoreductase*':
+            point_deduction: -0.2
+            feedback: 'The enzyme classification is not the enzyme name. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*human*':
+            point_deduction: -0.1
+            feedback: 'The organism name is not part of the enzyme name. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*':
+            point_deduction: -0.2
+            feedback: 'The name Alcohol Dehydrogenase says both its substrate and its enzyme action. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+
+  - name: "Enzyme Commission (EC) class"
+    csv_column: 8 #note starts at column 1, not 0
+    type: mc
+    answer: '(1) Oxidoreductases'
+    point_deduction: -0.3
+    feedback: 'this enzyme catayzes redox reactions the coenzyme is the clue.'
+
+  - name: "Product from Ethanol"
+    csv_column: 9 #note starts at column 1, not 0
+    type: str
+    answers: ['acetaldehyde']
+    auto wrong responses: [methanol, acetate, acetone, acetamide, aceticacid, glucose, formicacid, coq]
+    glob wrong responses:
+        'ch3cho':
+            point_deduction: -0.1
+            feedback: 'I did ask for the name, not the chemical formula.'
+        'mecho':
+            point_deduction: -0.1
+            feedback: 'I did ask for the name, not the chemical formula.'
+        'nad*':
+            point_deduction: -0.3
+            feedback: 'NAD+/NADH is a coenzyme not a product.'
+        '*':
+            point_deduction: -0.4
+            feedback: 'acetaldehyde is sometimes associated with drinking hangovers.'
+
+  - name: "Substrate that makes Formaldehyde"
+    csv_column: 10 #note starts at column 1, not 0
+    type: str
+    answers: ['methanol']
+    auto wrong responses: [acetaldehyde, acetate, acetone, acetamide, aceticacid, glucose, formicacid, coq]
+    glob wrong responses:
+        'ch3oh':
+            point_deduction: -0.1
+            feedback: 'I did ask for the name, not the chemical formula.'
+        'meoh':
+            point_deduction: -0.1
+            feedback: 'I did ask for the name, not the chemical formula.'
+        'nad*':
+            point_deduction: -0.3
+            feedback: 'NAD+/NADH is a coenzyme not a substrate.'
+        '*':
+            point_deduction: -0.4
+            feedback: 'this enzyme is what makes methanol poisonous.'
+
+  - name: "Coenzyme Name"
+    csv_column: 11 #note starts at column 1, not 0
+    type: str
+    answers: ['NAD+/NADH', 'nadh', 'nad', 'nad+', 'nadnadh',]
+    auto wrong responses: [acetaldehyde, methanol, acetate, acetone, acetamide, aceticacid, glucose, formicacid, coq,]
+    glob wrong responses:
+        'nadp*':
+            point_deduction: -0.1
+            feedback: 'NADP+/NADPH is a different molecule and has a different purpose than NAD+/NADH'
+        '*':
+            point_deduction: -0.2
+            feedback: 'NAD+/NADH, NADP+/NADPH, and FAD/FADH2 are the three coenzymes for redox rxns'
+
+  - name: "Metal Ion Cofactor"
+    csv_column: 12 #note starts at column 1, not 0
+    type: str
+    answers: ['Zinc, Zn(2+)', 'zn', 'zinc', 'zinczn', 'zn2']
+    auto wrong responses: [fe, mg, mn, ni, cu, ca, co, mo, iron, magnesium, manganese, nickel]
+    glob wrong responses:
+        'nad*':
+            point_deduction: -0.2
+            feedback: 'NAD is an metal nor is it an element, it is an organic molecule.'
+        '*':
+            point_deduction: -0.2
+            feedback: 'common metal ion cofactors include iron (Fe2+/3+), magnesium Mg(2+), manganese Mn(2+), and zinc Zn(2+)'
+
+image_questions:
+    - name: "Image was received"
+      type: bool
+      point_deduction: -1
+      feedback: 'no image submitted'
+
+    - name: "Protein PDB ID is correct"
+      type: bool
+      point_deduction: -1.5
+      feedback: 'this protein was not the one that was assigned, be sure to use the correct for ths protein image. Most often students upload the image from a previous assignment.'
+
+    - name: "White background was used"
+      type: bool
+      point_deduction: -0.1
+      feedback: 'one of the main criteria is to have a white background, try using Preset->Publication 1 for an easy fix.'
+
+    - name: "Subunits have different colors"
+      type: bool
+      point_deduction: -1
+      feedback: 'coloring the subunits was the main task of this assignment'
+
+    - name: "Specified Red and Unique Different colors were used"
+      type: bool
+      point_deduction: -0.1
+      feedback: 'the criteria specified to use red on the left and Unique Different on the right, you have different colors.'
+
+    - name: "Subunits are clearly separated, with a left and a right"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'the protein orientation did not have the subunits clearly on separate sides, you need to rotate the protein.'
+
+    - name: "Red on the left and Unique Different on the right"
+      type: bool
+      point_deduction: -0.1
+      feedback: 'be sure to check your left and right sides next time, you had them backwards.'
+
+    - name: "Crisp edges, no green halo from selection tool"
+      type: bool
+      point_deduction: 0
+      feedback: 'next time try to de-select all atoms before taking the image or you get a green halo'
+
+    - name: "Protein fills entire image; it is not too small"
+      type: bool
+      point_deduction: 0
+      feedback: 'Your protein model does not fill the frame of the image, next time zoom in to fill the image and avoid too much white space.'
+
+    - name: "Entire protein is visible, nothing is cut off or missing."
+      type: bool
+      point_deduction: 0
+      feedback: 'your protein image is zoomed in too far and it is cutting off important details, zoom out more next time.'
+
+    - name: "File type is PNG, not JPEG or something else"
+      type: bool
+      point_deduction: -0.1
+      feedback: 'The assignment is to export the image as a PNG file. Watch the YouTube videos again for the how-to.'
+
+    - name: "PNG image export was used, not a screenshot"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'it looks like you used a screen shot instead of exporting the image, the assignment to export the image it is of higher quality. Watch the YouTube videos again for the how-to.'
+
+    - name: "Unique image, not same as another student"
+      type: bool
+      point_deduction: -1.5
+      feedback: 'It appears that you uploaded the exact same image as another student. While you are welcome to work with other students, you must create your own independent image. Next time you will lose points'

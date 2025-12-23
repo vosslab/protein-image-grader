@@ -1,0 +1,99 @@
+
+image number: 1
+assignment name: 'Protein Image 1: 4TUT'
+total points: 5
+strict background: true
+
+meta columns:
+  First Name: 3
+  Last Name: 4
+  Student ID: 5
+  email: 2
+  timestamp: 1
+  image url: 6
+  extra description: 9
+
+#hide columns: [9, 10, 11]
+
+deadline:
+    due date: Feb 6, 2025
+    numeric_deductions: # in hours
+        0-48: 0
+        48-96: -0.1
+        96-192: -0.2
+        192-: -0.4
+
+csv_questions:
+  - name: "Protein Common Name"
+    csv_column: 7 #note starts at column 1, not 0
+    type: str
+    answers: ['Prion Peptide', 'prionprotein', 'prionpeptide']
+    #auto wrong responses: [ , ]
+    glob wrong responses:
+        '4tut':
+            point_deduction: -0.4
+            feedback: 'Please enter common name; not the PDB id. The question specifically asks you NOT to submit the PDB id. Unfortunately, there is no true formula for finding the protein name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        'prion':
+            point_deduction: 0
+            feedback: 'Prion is not specific enough. Unfortunately, there is no true formula for finding the protein name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        'peptide':
+            point_deduction: -0.1
+            feedback: 'Peptide is a generic term for a short amino acid chain, it is not specific enough. Unfortunately, there is no true formula for finding the protein name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*':
+            point_deduction: -0.1
+            feedback: 'Prion peptide or prion protein is the best answer. Unfortunately, there is no true formula for finding the protein name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+  - name: "Number of Amino Acids"
+    csv_column: 8 #note starts at column 1, not 0
+    type: int
+    numeric_deductions:
+        0-5: -0.1
+        7-12: -0.1
+        13-99: -0.3
+        99-: -0.4
+    answer: 6
+
+image_questions:
+    - name: "Image was received"
+      type: bool
+      point_deduction: -1
+      feedback: 'no image submitted'
+
+    - name: "Protein PDB ID is correct"
+      type: bool
+      point_deduction: -1
+      feedback: 'this protein was not the one that was assigned, be sure to use the correct for ths protein image. Most often students upload the image from a previous assignment.'
+
+    - name: "White background was used"
+      type: bool
+      point_deduction: 0
+      feedback: 'one of the main criteria is to have a white background, try using Preset->Publication 1 for an easy fix.'
+
+    - name: "Crisp edges, no green halo from selection tool"
+      type: bool
+      point_deduction: 0
+      feedback: 'next time try to de-select all atoms before taking the image or you get a green halo'
+
+    - name: "Protein fills entire frame; it is not too small"
+      type: bool
+      point_deduction: 0
+      feedback: 'your protein image does not fill the image, next time zoom in to fill the image and avoid too much white space.'
+
+    - name: "Entire protein is visible, nothing is cut off or missing."
+      type: bool
+      point_deduction: 0
+      feedback: 'your protein image is zoomed in too far and it is cutting off important details, zoom out more next time.'
+
+    - name: "File type is PNG, not JPEG or something else"
+      type: bool
+      point_deduction: 0
+      feedback: 'The assignment is to export the image as a PNG file. Watch the YouTube videos again for the how-to.'
+
+    - name: "PNG image export was used, not a screenshot"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'It looks like you used a screen shot instead of exporting the image, the assignment to export the image it is of higher quality. Watch the YouTube videos again for the how-to.'
+
+    - name: "Unique image, not same as another student"
+      type: bool
+      point_deduction: -1.0
+      feedback: 'It appears that you uploaded the exact same image as another student. While you are welcome to work with other students, you must create your own independent image. Next time you will lose more points'

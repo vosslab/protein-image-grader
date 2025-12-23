@@ -1,0 +1,144 @@
+
+image number: 8
+assignment name: 'Protein Image 8: 1BL8'
+total points: 5
+strict background: true
+
+meta columns:
+  First Name: 3
+  Last Name: 4
+  Student ID: 5
+  email: 2
+  timestamp: 1
+  image url: 6
+  extra description: 12
+
+#hide columns: [9, 10, 11]
+
+deadline:
+    due date: Apr 17, 2025
+    numeric_deductions: # in hours
+        0-12: 0
+        12-36: -0.1
+        36-99: -0.2
+        99-: -0.4
+
+csv_questions:
+    - name: "Protein Common Name"
+      csv_column: 7 #note starts at column 1, not 0
+      type: str
+      answers: [ 'Potassium Channel', 'potassiumchannel', 'k+channel', ]
+      glob wrong responses:
+        '*1bl8*':
+            point_deduction: -0.4
+            feedback: 'please enter common name; not the PDB id. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*kcsa*':
+            point_deduction: 0
+            feedback: 'Kcsa stands for K+ channel of streptomyces A, which not while wrong is not ideal. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*streptomyces*':
+            point_deduction: -0.2
+            feedback: 'The organism name is not part of the protein name. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*lividans*':
+            point_deduction: -0.2
+            feedback: 'The organism name is not part of the protein name. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*':
+            point_deduction: -0.2
+            feedback: 'Potassium channels are the most common type of ion channel found in virtually all organisms. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+
+
+    - name: "Last Author Full Name"
+      csv_column: 8 #note starts at column 1, not 0
+      type: str
+      answers: ['Roderick MacKinnon', 'roderickmackinnon', 'rodmackinnon', 'rmackinnon',]
+      auto wrong responses: [peroxidase, hydronium, hydrogen,]
+      glob wrong responses:
+            '*doyle*':
+                point_deduction: -0.2
+                feedback: 'I asked for the last author, not the first author.'
+            '*':
+                point_deduction: -0.2
+                feedback: 'The Full Name of the Last Author was Nobel laureate Rod MacKinnon.'
+
+
+    - name: "Year awarded Nobel Prize"
+      csv_column: 9 #note starts at column 1, not 0
+      type: int
+      answer: 2003
+      numeric_deductions:
+            0-1999: -0.3
+            2000-2002: -0.2
+            2004-2008: -0.2
+            2009-: -0.3
+
+    - name: "Number of chains"
+      csv_column: 10 #note starts at column 1, not 0
+      type: int
+      answer: 4
+      numeric_deductions:
+            1-2: -0.3
+            3-3: -0.2
+            5-5: -0.2
+            6-: -0.3
+
+    - name: "Type of Organism"
+      csv_column: 11 #note starts at column 1, not 0
+      type: mc
+      answer: 'Gram-positive bacteria'
+      point_deduction: -0.2
+      feedback: 'Streptomyces lividans is a gram-positive bacteria'
+
+image_questions:
+    - name: "Image was received ##"
+      type: bool
+      point_deduction: -1
+      feedback: 'no image submitted'
+
+    - name: "Protein PDB ID is correct"
+      type: bool
+      point_deduction: -3
+      feedback: 'this protein was not the one that was assigned, be sure to use the correct for ths protein image. Most often students upload the image from a previous assignment.'
+
+    - name: "Top down view of the channel"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'Part of the assignment was to orient the membrane protein in to top down view of the channel. Your image does not have this correct.'
+
+    - name: "Unique color for each subunit"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'Part of the assignment was to give each subunit a unique color, all of yours are the same color'
+
+    - name: "Unique color overall"
+      type: bool
+      point_deduction: -0.1
+      feedback: 'Part of the assignment was to give the molecule a unique color, but your image is just the default color.'
+
+    - name: "White background was used"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'one of the main criteria is to have a white background, try using Preset->Publication 1 for an easy fix.'
+
+    - name: "Crisp edges, no green halo from selection tool"
+      type: bool
+      point_deduction: 0
+      feedback: 'next time try to de-select all atoms before taking the image or you get a green halo'
+
+    - name: "Zoom level is good, not too small"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'your protein image does not fill the image, next time zoom in to fill the image and avoid too much white space.'
+
+    - name: "Zoom level is good, entire protein fits in frame and not cutoff"
+      type: bool
+      point_deduction: 0
+      feedback: 'your protein image is zoomed in too far and it is cutting off important details, zoom out more next time.'
+
+    - name: "File type is PNG, not JPEG or something else"
+      type: bool
+      point_deduction: -0.1
+      feedback: 'The assignment is to export the image as a PNG file. Watch the YouTube videos again for the how-to.'
+
+    - name: "PNG image export was used, not a screenshot"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'it looks like you used a screen shot instead of exporting the image, the assignment to export the image it is of higher quality. Watch the YouTube videos again for the how-to.'

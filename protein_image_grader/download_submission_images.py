@@ -8,106 +8,95 @@ import csv
 import time
 import random
 import argparse
-import urllib.request, urllib.parse, urllib.error
 
 # PIP3 modules
 import PIL.Image
 import googleapiclient.errors
 from pillow_heif import register_heif_opener
 
-#Local
-import commonlib
-try:
-	from tool_scripts import extract_faces
-except ImportError:
-	print("extract_faces not imported")
-	pass
-from tool_scripts import test_google_image
+# local repo modules
+import protein_image_grader.commonlib as commonlib
+import protein_image_grader.test_google_image as test_google_image
 
 register_heif_opener()
 
-#google_id = 2
-
 fail_count = 0
 
-# Define the image storage directory
-current_year = time.localtime().tm_year
-current_month = time.localtime().tm_mon
-if 1 <= current_month <= 5:
-	semester = "1Spring"
-elif 6 <= current_month <= 8:
-	semester = "2Summer"
-else:
-	semester = "3Fall"
-image_dir = f"{current_year}_{semester}"
-if not os.path.isdir(image_dir):
-	os.makedirs(image_dir)
-
 #============================================
-
 def parse_args():
 	"""
 	Parse command-line arguments.
 
 	Returns:
-		dict: Parsed arguments containing CSV filename.
+		args: Parsed arguments
 	"""
-	parser = argparse.ArgumentParser(description="Generate an HTML profile page from a CSV file.")
+	parser = argparse.ArgumentParser(description="Download submission images and build an HTML review page.")
 	parser.add_argument('-i', '--input', dest='csvfile',
 		type=str, required=True, help="Input CSV file")
 	parser.add_argument('-x', '--max-students', dest='maxstudents', default=-1,
-		type=int, required=False, help="Max Students, used for testings")
+		type=int, required=False, help="Max Students, used for testing")
 	parser.add_argument('-t', '--trim', dest='trim', action='store_true')
 	parser.add_argument('--no-trim', dest='trim', action='store_false')
 	parser.set_defaults(trim=False)
 	parser.add_argument('-r', '--rotate', dest='rotate', action='store_true')
 	parser.add_argument('--no-rotate', dest='rotate', action='store_false')
 	parser.set_defaults(rotate=False)
-	parser.add_argument('-f', '--face', dest='face', action='store_true')
-	parser.set_defaults(face=False)
-
-	type_group = parser.add_mutually_exclusive_group(required=True)
-	type_group.add_argument(
-		'--type', dest='image_type', type=str,
-		choices=('students', 'proteins'),
-		help='Set the question type: num (numeric) or mc (multiple choice)'
-	)
-	type_group.add_argument(
-		'-s', '--students', dest='image_type', action='store_const', const='students',
-		help='Set image type to students'
-	)
-	type_group.add_argument(
-		'-p', '--proteins', dest='image_type', action='store_const', const='proteins',
-		help='Set image type to proteins'
-	)
-	parser.add_argument('--image_number', dest='image_number', default=0,
-		type=int, required=False,)
-
+	parser.add_argument('-o', '--output-dir', dest='output_dir', type=str,
+		help="Output directory for downloads and HTML", default="data/runs")
+	parser.add_argument('-p', '--profiles-html', dest='profiles_html', type=str,
+		help="Output HTML file name", default=None)
+	parser.add_argument("--year", dest="year", type=int,
+		help="Year for grouping outputs", default=0)
+	parser.add_argument("--term", dest="term", type=str,
+		choices=("1Spring", "2Summer", "3Fall"),
+		help="Term for grouping outputs", default=None)
+	parser.add_argument("--session", dest="session", type=str,
+		help="Session label override", default=None)
+	parser.add_argument('--session-dir', dest='use_session_dir',
+		help='Organize outputs by session subfolder', action='store_true')
+	parser.add_argument('--no-session-dir', dest='use_session_dir',
+		help='Do not organize outputs by session subfolder', action='store_false')
+	parser.set_defaults(use_session_dir=True)
+	parser.add_argument('--image-number', dest='image_number', default=0,
+		type=int, required=False)
 	args = parser.parse_args()
 	return args
 
 #============================================
+def build_image_dir(image_number: int, output_dir: str) -> str:
+	"""
+	Build the output directory for downloaded images.
+
+	Args:
+		image_number (int): Protein image number.
+
+	Returns:
+		str: Output folder name.
+	"""
+	current_year = time.localtime().tm_year
+	if image_number > 0:
+		return os.path.join(output_dir, f"DOWNLOAD_{image_number:02d}_year_{current_year:04d}")
+	return os.path.join(output_dir, f"DOWNLOAD_images_year_{current_year:04d}")
 
 #============================================
-
-def get_image_html_tag(image_url: str, ruid: int, args) -> str:
+def get_image_html_tag(image_url: str, ruid: int, args, image_dir: str) -> str:
 	"""
 	Download image from Google Drive and return an HTML tag linking to the local file.
 
 	Args:
 		image_url: Google Drive image URL
 		ruid: Record ID for naming
-		args
+		args: Parsed arguments
+		image_dir: Output image directory
 
 	Returns:
 		str: HTML <img> tag(s) for the image
 	"""
-
-	# Extract file ID and download image
 	file_id = test_google_image.get_file_id_from_google_drive_url(image_url)
 	image_data, original_filename = try_download_image(file_id)
+	if image_data is None:
+		return ''
 
-	# Prepare filename and save
 	filename = format_filename(original_filename, ruid, args)
 	filepath = os.path.abspath(os.path.join(image_dir, filename))
 	if not os.path.exists(filepath):
@@ -117,28 +106,18 @@ def get_image_html_tag(image_url: str, ruid: int, args) -> str:
 	else:
 		print(f"file exists: {filename}")
 
-	# Optionally trim and rotate
 	trim_path = None
 	if args.trim:
 		trim_path = trim_and_save_image(filepath, args.rotate)
 
-	# Optionally extract face
-	face_path = None
-	if args.face:
-		face_path = extract_and_save_face(filepath)
-
-	# Build HTML
 	html_tag = f"<img border='3' src='file://{filepath}' height='250' />"
 	if args.trim and os.path.isfile(trim_path):
 		html_tag += f"<img border='3' src='file://{trim_path}' height='350' />"
-	if args.face and os.path.isfile(face_path):
-		html_tag += f"<img border='3' src='file://{face_path}' height='450' />"
 
 	print('')
 	return html_tag
 
 #============================================
-
 def try_download_image(file_id: str) -> tuple:
 	"""
 	Try downloading an image using service account.
@@ -163,7 +142,6 @@ def try_download_image(file_id: str) -> tuple:
 		return None, ''
 
 #============================================
-
 def format_filename(original_filename: str, ruid: int, args) -> str:
 	"""
 	Clean and normalize the filename for saving.
@@ -171,7 +149,7 @@ def format_filename(original_filename: str, ruid: int, args) -> str:
 	Args:
 		original_filename: Original filename
 		ruid: Record ID
-		clib: CommonLib instance for cleaning
+		args: Parsed arguments
 
 	Returns:
 		str: Normalized and extended filename
@@ -181,18 +159,12 @@ def format_filename(original_filename: str, ruid: int, args) -> str:
 	basename = os.path.splitext(filename)[0]
 	basename = clib.cleanName(basename)
 	extension = os.path.splitext(filename)[-1]
-	if args.image_type == "students":
-		filename = f"{ruid}-profile-{basename}{extension}"
-	elif args.image_type == "proteins":
-		filename = f"{ruid}-protein{args.image_number:02d}-{basename}{extension}"
-	else:
-		sys.exit(1)
+	filename = f"{ruid}-protein{args.image_number:02d}-{basename}{extension}"
 	if not filename.endswith('.jpg') and not filename.endswith('.png'):
 		filename = os.path.splitext(filename)[0] + '.jpg'
 	return filename
 
 #============================================
-
 def download_and_save_image(image_data, filepath: str) -> bool:
 	"""
 	Save the downloaded image if not already present.
@@ -207,13 +179,11 @@ def download_and_save_image(image_data, filepath: str) -> bool:
 	if os.path.isfile(filepath):
 		return False
 	pil_image = PIL.Image.open(image_data)
-
 	pil_image.save(filepath)
 	print(f"saved {os.path.basename(filepath)}")
 	return True
 
 #============================================
-
 def trim_and_save_image(filepath: str, rotate: bool=False) -> str:
 	"""
 	Trim borders and optionally rotate the image, then save.
@@ -237,49 +207,16 @@ def trim_and_save_image(filepath: str, rotate: bool=False) -> str:
 	return trim_path
 
 #============================================
-def extract_and_save_face(filepath: str) -> str:
-	"""
-	Extract face from the given image and save cropped result.
-
-	Args:
-		filepath: Path to full input image
-
-	Returns:
-		str: Path to saved face image, or empty string if none found
-	"""
-	print(f"detecting face in image: {os.path.basename(filepath)}")
-	face_path = os.path.splitext(filepath)[0] + '-face.jpg'
-	if os.path.isfile(face_path):
-		print(f"[ok] Face image exists: {os.path.basename(face_path)}")
-		return face_path
-	success = extract_faces.process_image(filepath, face_path)
-
-	if success and os.path.isfile(face_path):
-		print(f"[ok] Face image saved: {os.path.basename(face_path)}")
-		return face_path
-	else:
-		print(f"[fail] Face did not work")
-		# Remove file if created but face was not found
-		if os.path.isfile(face_path):
-			os.remove(face_path)
-		return ''
-
-#============================================
-
 def write_header(output, filename: str):
 	"""
 	Write the HTML header to the output file.
 	"""
-	# Extract the title from the filename
 	title = os.path.splitext(filename)[0].title()
-
-	# Write the HTML opening tags and title
 	output.write("<html><head>\n")
 	output.write(f"<title>{title}</title>\n")
 	output.write("</head><body>\n")
 
 #============================================
-
 def find_first_name_key_index_from_header(header: list) -> int:
 	"""
 	Find the index of the "First Name" or "Full Name" column.
@@ -290,24 +227,17 @@ def find_first_name_key_index_from_header(header: list) -> int:
 	Returns:
 		int: Index of the first name column, or None if not found.
 	"""
-	# Search for "First Name" in the header row
 	for i, item in enumerate(header):
 		sitem = item.strip().lower()
 		if 'first' in sitem and 'name' in sitem:
 			return i
-
-	# Backup check for "Full Name"
 	for i, item in enumerate(header):
 		sitem = item.strip().lower()
 		if 'full' in sitem and 'name' in sitem:
 			return i
-
-	# Return None if no valid column is found
 	return None
 
-
 #============================================
-
 def read_csv(csvfile: str, maxstudents: int) -> tuple:
 	"""
 	Read the CSV file and extract the data into a list.
@@ -318,19 +248,15 @@ def read_csv(csvfile: str, maxstudents: int) -> tuple:
 	Returns:
 		tuple: (header row, sorted data list, first name key index)
 	"""
-	# Check if the file exists
 	if not os.path.exists(csvfile):
 		raise ValueError(f"Error: File '{csvfile}' does not exist.")
 
 	data_tree = []
 	first_name_key_index = None
 
-	# Open and read the CSV file
 	with open(csvfile, "r") as f:
 		data = csv.reader(f)
 		header = None
-
-		# Process each row in the CSV file
 		for row in data:
 			if header is None:
 				header = row
@@ -340,100 +266,109 @@ def read_csv(csvfile: str, maxstudents: int) -> tuple:
 			if maxstudents > 0 and len(data_tree) >= maxstudents:
 				break
 
-	# Attempt to sort the data by the first name column
 	data_tree.sort(key=lambda x: x[first_name_key_index].lower().strip())
-
 	return header, data_tree
 
+#============================================
 def extract_number_in_range(s: str) -> int:
-	"""Extract the first integer between 1 and 20 (inclusive) from the string.
-
-	Args:
-		s: The input string which may contain digits.
-
-	Returns:
-		The integer if found, otherwise raises ValueError.
 	"""
-	# Find all 1 or 2 digit numbers
+	Extract the first integer between 1 and 20 (inclusive) from the string.
+	"""
 	matches = re.findall(r'\d{1,2}', s)
 	for match in matches:
 		num = int(match)
 		if 1 <= num <= 20:
-			return num
+	return num
 	print(f"No number in range 1-20 found in string: {s}")
 	sys.exit(1)
 
 #============================================
+def get_term_from_month(month: int) -> str:
+	"""
+	Map month to term label.
+	"""
+	if 1 <= month <= 5:
+		return "1Spring"
+	if 6 <= month <= 8:
+		return "2Summer"
+	return "3Fall"
 
-def generate_html(csvfile: str, header: list, data_tree: list, args):
+#============================================
+def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: str,
+		output_html: str):
 	"""
 	Generate an HTML file based on the CSV data.
 	"""
-	# Define the output HTML filename
-	output_filename = "profiles.html"
-	if args.image_type == "proteins":
+	if args.image_number == 0:
 		args.image_number = extract_number_in_range(csvfile)
 
-	# Open the output file and write the HTML content
-	with open(output_filename, "w") as output:
+	with open(output_html, "w") as output:
 		write_header(output, csvfile)
 		count = 0
 
-		# Process each row and generate HTML content
 		for row in data_tree:
 			count += 1
 			ruid = None
 
-			# Insert a page break for multiple profiles
 			if count > 1:
 				output.write('<br/><p style="page-break-before: always"><br/></p>\n')
 
-			# Process each column in the row
 			for i, item in enumerate(row):
-				# Skip empty fields
 				if len(item) < 1:
 					continue
 				elif item.startswith('900') or item.startswith('960'):
 					ruid = int(item)
-				# Process URLs as images
 				elif item.startswith('http'):
-					img_html_tag = get_image_html_tag(item, ruid, args)
+					img_html_tag = get_image_html_tag(item, ruid, args, image_dir)
 					output.write(f"{img_html_tag}\n")
-				# Regular text fields
 				else:
 					output.write(f"<p><b>{header[i].strip()}</b>:&nbsp; {row[i].strip()}</p>\n")
 
 #============================================
-
-def open_html_in_browser():
+def open_html_in_browser(html_path: str):
 	"""
 	Open the generated HTML file in a web browser.
 	"""
-	#cmd = "open -a /Applications/Firefox.app profiles.html"
-	#cmd = "open profiles.html"
-	#proc = subprocess.Popen(cmd, shell=True)
-	#proc.communicate()
-	os.system("open profiles.html")
+	os.system(f"open {html_path}")
 
 #============================================
-
 def main():
 	"""
 	Main function to parse arguments and process the CSV file.
 	"""
-	# Parse command-line arguments
 	args = parse_args()
 
-	# Read the CSV file
+	year = args.year
+	term = args.term
+	session = args.session
+
+	if year == 0:
+		year = time.localtime().tm_year
+	if term is None:
+		term = get_term_from_month(time.localtime().tm_mon)
+	if session is None:
+		session = f"{year}_{term}"
+	if args.use_session_dir:
+		args.output_dir = os.path.join(args.output_dir, session)
+
+	if not os.path.isdir(args.output_dir):
+		os.makedirs(args.output_dir)
+
 	header, data_tree = read_csv(args.csvfile, args.maxstudents)
 
-	# Generate the HTML file
-	generate_html(args.csvfile, header, data_tree, args)
+	if args.image_number == 0:
+		args.image_number = extract_number_in_range(args.csvfile)
+	image_dir = build_image_dir(args.image_number, args.output_dir)
+	if not os.path.isdir(image_dir):
+		os.makedirs(image_dir)
 
-	# Open the generated HTML file in the browser
-	open_html_in_browser()
+	if args.profiles_html is None:
+		args.profiles_html = os.path.join(
+			args.output_dir, f"profiles_image_{args.image_number:02d}.html")
+
+	generate_html(args.csvfile, header, data_tree, args, image_dir, args.profiles_html)
+	open_html_in_browser(args.profiles_html)
 
 #============================================
-
 if __name__ == '__main__':
 	main()

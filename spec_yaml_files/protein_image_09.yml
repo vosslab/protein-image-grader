@@ -1,0 +1,129 @@
+
+image number: 9
+assignment name: 'Protein Image 9: 6I9K'
+total points: 5
+strict background: true
+
+meta columns:
+  First Name: 3
+  Last Name: 4
+  Student ID: 5
+  email: 2
+  timestamp: 1
+  image url: 6
+  extra description: 11
+
+#hide columns: [9, 10, 11]
+
+deadline:
+    due date: Apr 24, 2025
+    numeric_deductions: # in hours
+        0-12: 0
+        12-36: -0.1
+        36-99: -0.2
+        99-: -0.4
+
+csv_questions:
+    - name: "Protein Common Name"
+      csv_column: 7 #note starts at column 1, not 0
+      type: str
+      answers: [ 'Rhodopsin', 'rhodopsin', 'rhodopsin1',  ]
+      glob wrong responses:
+        '*1ehz*':
+            point_deduction: -0.4
+            feedback: 'please enter common name; not the PDB id. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*spider*':
+            point_deduction: -0.2
+            feedback: 'The organism name is not part of the enzyme name. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*retinal*':
+            point_deduction: -0.2
+            feedback: 'any bound ligands like retinal are not part of the enzyme name. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*':
+            point_deduction: -0.2
+            feedback: 'Transfer RNA is an adaptor molecule that connects mRNA and amino acid sequence. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+
+    - name: "Number of alpha helices"
+      csv_column: 8 #note starts at column 1, not 0
+      type: int
+      answer: 7
+      numeric_deductions:
+            0-4: -0.3
+            5-6: -0.1
+            8-9: -0.1
+            10-: -0.3
+      feedback: "Do you recall that GPCRs have 7 transmembrane helices from lecture"
+
+    - name: "Type of protein structure"
+      csv_column: 9 #note starts at column 1, not 0
+      type: mc
+      answer: 'G protein-coupled receptor (GPCR)'
+      point_deduction: -0.2
+      feedback: 'G protein-coupled receptor (GPCR) is the answer or a 7TM receptor.'
+
+    - name: "OLC classification"
+      csv_column: 10 #note starts at column 1, not 0
+      type: mc
+      answer: 'trans-unsaturated monoglyceride'
+      point_deduction: -0.2
+      feedback: 'OLC has a trans double bond at location 9 and it is also connected to glycerol, so it is a monoglyceride'
+
+image_questions:
+    - name: "Zoom level is good, not too small"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'your protein image does not fill the image, next time zoom in to fill the image and avoid too much white space.'
+
+    - name: "Image was received"
+      type: bool
+      point_deduction: -1
+      feedback: 'no image submitted'
+
+    - name: "Protein PDB ID is correct"
+      type: bool
+      point_deduction: -3
+      feedback: 'this protein was not the one that was assigned, be sure to use the correct for ths protein image. Most often students upload the image from a previous assignment.'
+
+    - name: "Side view of the channel"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'Part of the assignment was to orient the membrane protein into a side view of the channel. Your image does not have this correct.'
+
+    - name: "the membrane is oriented left to right (not up-down)"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'Part of the assignment was to have the membrane is oriented left to right. Your image did not have this correct.'
+
+    - name: "the retinal ligand has a bright color"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'Part of the assignment was to color the retinal ligand a bright color. Your image did not have this.'
+
+    - name: "the bright colored retinal ligand stands out from the protein"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'Part of the assignment was to color the retinal ligand a bright color so that it stands out from the protein. While your image has a bright colored retinal ligand, it does not stand out.'
+
+    - name: "White background was used"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'one of the main criteria is to have a white background, try using Preset->Publication 1 for an easy fix.'
+
+    - name: "Crisp edges, no green halo from selection tool"
+      type: bool
+      point_deduction: 0
+      feedback: 'next time try to de-select all atoms before taking the image or you get a green halo'
+
+    - name: "Zoom level is good, entire protein fits in frame and not cutoff"
+      type: bool
+      point_deduction: 0
+      feedback: 'your protein image is zoomed in too far and it is cutting off important details, zoom out more next time.'
+
+    - name: "File type is PNG, not JPEG or something else"
+      type: bool
+      point_deduction: -0.1
+      feedback: 'The assignment is to export the image as a PNG file. Watch the YouTube videos again for the how-to.'
+
+    - name: "PNG image export was used, not a screenshot"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'it looks like you used a screen shot instead of exporting the image, the assignment to export the image it is of higher quality. Watch the YouTube videos again for the how-to.'

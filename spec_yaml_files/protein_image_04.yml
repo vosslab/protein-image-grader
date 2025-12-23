@@ -1,0 +1,144 @@
+
+image number: 4
+assignment name: 'Protein Image 4: 1OXG'
+total points: 5
+strict background: false
+
+meta columns:
+  First Name: 3
+  Last Name: 4
+  Student ID: 5
+  email: 2
+  timestamp: 1
+  image url: 6
+  extra description: 10
+
+
+#hide columns: [9, 10, 11]
+
+deadline:
+    due date: Mar 13, 2025
+    numeric_deductions: # in hours
+        0-12: 0
+        12-36: -0.1
+        36-99: -0.2
+        99-: -0.4
+
+csv_questions:
+  - name: "Protein Common Name"
+    csv_column: 7 #note starts at column 1, not 0
+    type: str
+    answers: [ 'alpha-chymotrypsin', 'alphachymotrypsin', 'achymotrypsin',
+        'chymotrypsinogen', 'chymotrypsinogena',
+        'chymotrypsin', 'chymotrypsina', 'chymotrypsinalpha', ]
+    glob wrong responses:
+        '*1oxg*':
+            point_deduction: -0.4
+            feedback: 'please enter common name; not the PDB id. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*bovine*':
+            point_deduction: -0.1
+            feedback: 'The organism name is not part of the enzyme name. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*peptide*':
+            point_deduction: -0.2
+            feedback: 'any bound ligands like capric acid is not part of the enzyme name. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*hydrolase*':
+            point_deduction: -0.2
+            feedback: 'Please provice the common enzyme name, not its classification. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+        '*':
+            point_deduction: -0.2
+            feedback: 'The name alpha-chymotrypsin is a globular hydrolase enzyme. Unfortunately, there is no true formula for finding the protein common name, so it might require some background reading on the protein. You can usually find it within the PDB structure name, but it might not be obvious which words are correct.'
+
+  - name: "Enzyme Commission (EC) class"
+    csv_column: 8 #note starts at column 1, not 0
+    type: mc
+    answer: '(3) Hydrolases'
+    point_deduction: -0.2
+    feedback: 'this enzyme breaks down proteins using water to cut the bonds.'
+
+  - name: "Key Amino Acids"
+    csv_column: 9 #note starts at column 1, not 0
+    type: ma
+    answer: 'Serine;Histidine;Aspartate'
+    point_deduction: -0.2
+    feedback: 'the key amino acids were on the lecture slide for the protein image.'
+
+image_questions:
+    - name: "Image was received"
+      type: bool
+      point_deduction: -1
+      feedback: 'no image submitted'
+
+    - name: "Protein PDB ID 1OXG is shown, not error message"
+      type: bool
+      point_deduction: -1
+      feedback: 'The PDB was 1OXG, that is one-oh (1OXG or 1oxg) not one-zero (10XG).'
+
+    - name: "Protein PDB ID is correct"
+      type: bool
+      point_deduction: -3
+      feedback: 'this protein was not the one that was assigned, be sure to use the correct for ths protein image. Most often students upload the image from a previous assignment.'
+
+    - name: "Bulk of protein is colored blue"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'Part of the assignment was to color the protein blue. Your image does not have a blue protein.'
+
+    - name: "Active site amino acids are red"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'Part of the assignment was to color the three active site amino acids red. Your image did not have a red trio of amino acids. Rewatch the video to get a better grasp of the concept.'
+
+    - name: "Only three amino acids are red"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'While you colored some amino acids red, you colored the wrong number of them. Exactly three amino acids should be red. Rewatch the video to get a better grasp of the concept.'
+
+    - name: "Correct three active site amino acids were selected"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'Part of the assignment was to color the three active site amino acids red. Specifically Asp 102, His 57, Ser 195, which are all next to one another in the 3D structure. You selected different amino acids.'
+
+    - name: "Atoms of the active site are visible"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'Atoms of the active site are not visible. Rewatch the video to get a better grasp of the concept.'
+
+    - name: "Active site is zoomed in on"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'the active site is not the focus of this image, the requirement was zoom in on the active site. Zooming in on the region was not too challenging. Rewatch the video to get a better grasp of the concept.'
+
+    - name: "White background was used"
+      type: bool
+      point_deduction: -0.2
+      feedback: 'one of the main criteria is to have a white background, try using Preset->Publication 1 for an easy fix.'
+
+    - name: "Crisp edges, no green halo from selection tool"
+      type: bool
+      point_deduction: 0
+      feedback: 'next time try to de-select all atoms before taking the image or you get a green halo'
+
+    - name: "Zoom level is good, not too small"
+      type: bool
+      point_deduction: 0
+      feedback: 'your protein image does not fill the image, next time zoom in to fill the image and avoid too much white space.'
+
+    - name: "Zoom level is good, entire protein fits in frame and not cutoff"
+      type: bool
+      point_deduction: 0
+      feedback: 'your protein image is zoomed in too far and it is cutting off important details, zoom out more next time.'
+
+    - name: "File type is PNG, not JPEG or something else"
+      type: bool
+      point_deduction: -0.1
+      feedback: 'The assignment is to export the image as a PNG file. Watch the YouTube videos again for the how-to.'
+
+    - name: "PNG image export was used, not a screenshot"
+      type: bool
+      point_deduction: -0.3
+      feedback: 'it looks like you used a screen shot instead of exporting the image, the assignment to export the image it is of higher quality. Watch the YouTube videos again for the how-to.'
+
+    - name: "Unique image, not same as another student"
+      type: bool
+      point_deduction: -3.5
+      feedback: 'It appears that you uploaded the exact same image as another student. While you are welcome to work with other students, you must create your own independent image. Next time you will lose even more points.'
