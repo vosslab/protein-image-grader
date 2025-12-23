@@ -1,0 +1,5 @@
+google-api-python-client
+imagehash
+pillow
+pillow_heif
+py-applescript
