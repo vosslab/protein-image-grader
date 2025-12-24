@@ -23,3 +23,8 @@
 - Add basic test scripts for common merge and pyflakes.
 - Fix pyflakes warnings and skip archive content in lint script.
 - Fix test import path for `protein_image_grader` package.
+- Auto-copy input CSV into `data/runs/IMAGE_XX/` and default roster to `current_students.csv`.
+- Improve missing roster error messaging.
+- Ignore duplicate matches when filenames share the same 9-digit RUID prefix.
+- Skip missing archive files when opening duplicate-review groups and guard against missing student entries.
+- Document RUID duplicate-handling in archive and usage docs.

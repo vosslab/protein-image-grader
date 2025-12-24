@@ -4,14 +4,15 @@ Grading system for biochemistry protein images.
 ## Quick start
 - Install dependencies from `pip_requirements.txt`.
 - Put assignment specs in `spec_yaml_files/`.
-- Put roster data in `data/inputs/current_students.csv`.
+- Put roster data in `current_students.csv` at the repo root.
+- Drop the assignment CSV in the repo root or `data/runs/`.
 - Run `python3 grade_protein_image.py -i <image_number>`.
 - After grading, run `python3 send_feedback_email.py -i <image_number>`.
 
 ## Project layout
 - `spec_yaml_files/` holds assignment spec YAML files.
 - `spec_yaml_files/common_image_questions.yml` holds shared image questions.
-- `data/inputs/` holds current roster data and templates.
+- `data/inputs/` holds templates and optional inputs.
 - `data/runs/` holds generated grading outputs.
 - `archive/` holds the cheat detection hash database and archive images (images ignored by git).
 

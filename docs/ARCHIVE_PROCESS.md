@@ -40,17 +40,21 @@ Computed in `duplicate_processing.py`:
 - `fill_local_image_hashes()` builds `local_image_hashes`
 	- `md5` and `phash` keys map to lists of filenames
 - `find_exact_local_duplicates()` flags exact matches within the current submission set
+- Files that share the same 9-digit RUID prefix are treated as the same student and are not flagged
 
 ### Global duplicates (across semesters)
 Computed in `duplicate_processing.py`:
 - `load_image_hashes()` loads `archive/image_hashes.yml`
 - `find_exact_global_duplicates()` checks current images against `md5` and `phash`
+- Matches with the same 9-digit RUID prefix are ignored (same student resubmission)
+- Archive files without a 9-digit prefix are still eligible for duplicate checks
 
 ### Similar images
 Computed in `duplicate_processing.py`:
 - `find_similar_duplicates()` compares each current `phash` to the archive `phash`
 - It also compares current images to each other
 - The Hamming distance cutoff is currently `38`
+- Similarity warnings also skip matches that share the same 9-digit RUID prefix
 
 ## Hash generation details
 Hashes are computed in `test_google_image.py`:

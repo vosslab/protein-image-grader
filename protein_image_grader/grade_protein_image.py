@@ -4,6 +4,7 @@
 import os
 import sys
 import glob
+import shutil
 import time
 import yaml
 import fnmatch
@@ -367,6 +368,8 @@ def parse_args() -> None:
 		help="Assignment spec YAML directory", default="spec_yaml_files")
 	parser.add_argument("-d", "--data-dir", dest="data_dir", type=str,
 		help="Input data directory", default="data/inputs")
+	parser.add_argument("-r", "--roster", dest="roster_csv", type=str,
+		help="Roster CSV path", default="current_students.csv")
 	parser.add_argument("-o", "--run-dir", dest="run_dir", type=str,
 		help="Output run directory", default="data/runs")
 	parser.add_argument("-y", dest="yaml_backup_file", type=str,
@@ -386,6 +389,7 @@ def parse_and_prepare() -> dict:
 	image_number = args.image_number
 	spec_dir = args.spec_dir
 	data_dir = args.data_dir
+	roster_csv = args.roster_csv
 	run_dir = args.run_dir
 	if not os.path.isdir(spec_dir):
 		raise ValueError(f"Spec directory not found: {spec_dir}")
@@ -416,15 +420,28 @@ def parse_and_prepare() -> dict:
 
 	# Construct file paths
 	config_yaml = os.path.join(spec_dir, f"protein_image_{image_number:02d}.yml")
-	input_csv_glob = glob.glob(os.path.join(
-		folder, f"BCHM_Prot_Img_{image_number:02d}-*.csv"))
+	csv_pattern = f"BCHM_Prot_Img_{image_number:02d}-*.csv"
+	input_csv_glob = glob.glob(os.path.join(folder, csv_pattern))
 	if len(input_csv_glob) < 1:
-		raise ValueError(f"Input CSV not found in {folder}")
-	input_csv = input_csv_glob.pop()
+		search_roots = [os.getcwd(), run_dir, data_dir]
+		candidates = []
+		for search_root in search_roots:
+			candidates.extend(glob.glob(os.path.join(search_root, csv_pattern)))
+		candidates = list(dict.fromkeys(candidates))
+		if len(candidates) < 1:
+			raise ValueError(f"Input CSV not found: {csv_pattern}")
+		if len(candidates) > 1:
+			raise ValueError(f"Multiple input CSV files found: {candidates}")
+		source_csv = candidates[0]
+		target_csv = os.path.join(folder, os.path.basename(source_csv))
+		shutil.copy2(source_csv, target_csv)
+		input_csv = target_csv
+	else:
+		input_csv = input_csv_glob.pop()
 	output_csv = os.path.join(folder, f"output-protein_image_{image_number:02d}.csv")
 	output_yml = os.path.join(folder, f"output-protein_image_{image_number:02d}.yml")
 	grades_csv = os.path.join(folder, f"blackboard_upload-protein_image_{image_number:02d}.csv")
-	student_ids_csv = os.path.join(data_dir, "current_students.csv")
+	student_ids_csv = roster_csv
 	image_hashes_yaml = os.path.join(archive_root, "image_hashes.yml")
 
 	params_dict = {
@@ -474,7 +491,7 @@ def display_info(params: dict):
 	table.add_row("Output CSV", params["output_csv"])
 	table.add_row("Output YML", params["output_yml"])
 	table.add_row("Grades CSV", params["grades_csv"])
-	table.add_row("Student IDs CSV", params["student_ids_csv"])
+	table.add_row("Roster CSV", params["student_ids_csv"])
 	table.add_row("Image Hashes", params["image_hashes_yaml"])
 	table.add_row("Archive Session", params["archive_session_dir"])
 
@@ -629,6 +646,11 @@ def load_student_data(params: dict, read_only_config: dict) -> tuple:
 	timestamp_tools.check_due_date(student_tree[-1]['timestamp'], read_only_config)
 
 	# Load student IDs
+	if not os.path.isfile(params["student_ids_csv"]):
+		raise ValueError(
+			f"Roster CSV not found: {params['student_ids_csv']}\n"
+			"Place the roster at repo root as `current_students.csv` or pass --roster."
+		)
 	student_ids_tree = file_io_protein.read_student_ids(params["student_ids_csv"])
 	student_id_protein.match_lists_and_add_student_ids(student_ids_tree, student_tree)
 
