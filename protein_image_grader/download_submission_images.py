@@ -18,7 +18,7 @@ import yaml
 
 # local repo modules
 import protein_image_grader.commonlib as commonlib
-import protein_image_grader.test_google_image as test_google_image
+import protein_image_grader.google_drive_image_utils as google_drive_image_utils
 
 register_heif_opener()
 
@@ -83,7 +83,7 @@ def get_image_html_tag(image_url: str, ruid: int, args, image_dir: str,
 	Returns:
 		str: HTML <img> tag(s) for the image
 	"""
-	file_id = test_google_image.get_file_id_from_google_drive_url(image_url)
+	file_id = google_drive_image_utils.get_file_id_from_google_drive_url(image_url)
 	image_data, original_filename = try_download_image(file_id)
 	if image_data is None:
 		return ''
@@ -100,7 +100,7 @@ def get_image_html_tag(image_url: str, ruid: int, args, image_dir: str,
 	archive_path = archive_image_if_needed(filepath, archive_dir)
 	if archive_path and image_hashes is not None:
 		with open(archive_path, 'rb') as f:
-			md5hash, phash = test_google_image.get_hash_data(f)
+			md5hash, phash = google_drive_image_utils.get_hash_data(f)
 		hashes_changed[0] = update_image_hashes(
 			image_hashes, md5hash, phash, archive_path
 		) or hashes_changed[0]
@@ -129,7 +129,7 @@ def try_download_image(file_id: str) -> tuple:
 	"""
 	global fail_count
 	try:
-		image_data, original_filename = test_google_image.download_image(file_id)
+		image_data, original_filename = google_drive_image_utils.download_image(file_id)
 		return image_data, original_filename
 	except googleapiclient.errors.HttpError as e:
 		fail_count += 1
@@ -212,9 +212,9 @@ def trim_and_save_image(filepath: str, rotate: bool=False) -> str:
 		str: Path to trimmed image
 	"""
 	pil_image = PIL.Image.open(filepath)
-	trimmed_image = test_google_image.multi_trim(pil_image, 1)
+	trimmed_image = google_drive_image_utils.multi_trim(pil_image, 1)
 	if rotate:
-		trimmed_image = test_google_image.rotate_if_tall(trimmed_image)
+		trimmed_image = google_drive_image_utils.rotate_if_tall(trimmed_image)
 	if trimmed_image.mode != 'RGB':
 		trimmed_image = trimmed_image.convert('RGB')
 	trim_path = os.path.splitext(filepath)[0] + '-trim.jpg'

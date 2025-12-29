@@ -6,7 +6,7 @@ import yaml
 import imagehash
 from PIL import Image
 
-import protein_image_grader.test_google_image as test_google_image
+import protein_image_grader.google_drive_image_utils as google_drive_image_utils
 
 def calculate_md5(image_path: str) -> str:
 	"""
@@ -23,7 +23,7 @@ def calculate_md5(image_path: str) -> str:
 		MD5 hash of the image's pixel data
 	"""
 	image_data = open(image_path, 'rb')
-	return test_google_image.calculate_md5(image_data)
+	return google_drive_image_utils.calculate_md5(image_data)
 
 def calculate_phash(image_path: str, hash_size: int = 16) -> str:
 	"""
@@ -79,7 +79,7 @@ if __name__ == '__main__':
 		print(filepath)
 		# Calculate MD5 and pHash
 		image_data = open(filepath, 'rb')
-		md5_hash, perceptual_hash = test_google_image.get_hash_data(image_data)
+		md5_hash, perceptual_hash = google_drive_image_utils.get_hash_data(image_data)
 
 		# Update the dictionaries
 		md5_dict[md5_hash] = filepath

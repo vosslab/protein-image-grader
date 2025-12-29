@@ -1,5 +1,9 @@
 # Changelog
 
+## 2025-12-29
+- Add service key discovery helper in `protein_image_grader/test_google_image.py`.
+- Remove the root-level `test_google_image.py` script.
+
 ## 2025-12-23
 - Add `pip_requirements.txt` with third-party dependencies used in this repo.
 - Add this changelog file.

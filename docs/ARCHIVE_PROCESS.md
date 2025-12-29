@@ -57,7 +57,7 @@ Computed in `duplicate_processing.py`:
 - Similarity warnings also skip matches that share the same 9-digit RUID prefix
 
 ## Hash generation details
-Hashes are computed in `test_google_image.py`:
+Hashes are computed in `google_drive_image_utils.py`:
 - `calculate_md5()` hashes the trimmed pixel data
 - `calculate_phash()` uses perceptual hash on trimmed images
 

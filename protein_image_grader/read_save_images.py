@@ -9,7 +9,7 @@ import yaml
 from rich.console import Console
 from rich.style import Style
 from PIL import Image
-import protein_image_grader.test_google_image as test_google_image
+import protein_image_grader.google_drive_image_utils as google_drive_image_utils
 import protein_image_grader.student_id_protein as student_id_protein
 
 console = Console()
@@ -41,8 +41,8 @@ def get_image_data(student_entry: dict, params: dict):
 	original_filename = None
 
 	if len(file_search) == 0:
-		file_id = test_google_image.get_file_id_from_google_drive_url(image_url)
-		image_data, original_filename = test_google_image.download_image(file_id)
+		file_id = google_drive_image_utils.get_file_id_from_google_drive_url(image_url)
+		image_data, original_filename = google_drive_image_utils.download_image(file_id)
 		download_count += 1
 		print(f"original_filename = {original_filename}")
 		filename = original_filename.lower()
@@ -66,12 +66,12 @@ def get_image_data(student_entry: dict, params: dict):
 #============================================
 def create_image_dict(image_data, original_filename, output_filename):
 	"""Process image metadata and create a dictionary of attributes."""
-	named_corner_pixels_dict = test_google_image.inspect_image_data(image_data)
+	named_corner_pixels_dict = google_drive_image_utils.inspect_image_data(image_data)
 	if named_corner_pixels_dict is None:
 		console.print("  Error: Image metadata not found, possibly corrupt file.")
 		raise ValueError
 
-	md5hash, phash = test_google_image.get_hash_data(image_data)
+	md5hash, phash = google_drive_image_utils.get_hash_data(image_data)
 	image_data.seek(0)
 	pil_image = Image.open(image_data)
 
