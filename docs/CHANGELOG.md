@@ -1,7 +1,8 @@
 # Changelog
 
 ## 2025-12-29
-- Add service key discovery helper in `protein_image_grader/test_google_image.py`.
+- Rename `protein_image_grader/test_google_image.py` to `protein_image_grader/google_drive_image_utils.py`.
+- Add service key discovery helper in `protein_image_grader/google_drive_image_utils.py`.
 - Remove the root-level `test_google_image.py` script.
 
 ## 2025-12-23
@@ -10,7 +11,7 @@
 - Create `protein_image_grader/` as the canonical code location and add root entry scripts.
 - Add `download_submission_images.py` for downloading protein images and generating HTML review output.
 - Remove legacy `teaching_scripts/` and `protein_images/` directories after migration.
-- Implement `download_image_and_inspect()` in `protein_image_grader/test_google_image.py`.
+- Implement `download_image_and_inspect()` in `protein_image_grader/google_drive_image_utils.py`.
 - Remove `protein_image_grader/sendEmail.py` (older email script superseded by `send_feedback_email.py`).
 - Add `spec_yaml_files/` as tracked assignment specs.
 - Add `data/inputs/current_students_template.csv` and ignore `data/inputs/current_students.csv`.
