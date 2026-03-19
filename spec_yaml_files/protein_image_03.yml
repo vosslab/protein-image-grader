@@ -16,7 +16,7 @@ meta columns:
 #hide columns: [9, 10, 11]
 
 deadline:
-    due date: Feb 27, 2025
+    due date: Feb 26, 2026
     numeric_deductions: # in hours
         0-12: 0
         12-36: -0.1
