@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-05-05
+- Fix `source_me.sh` to prepend the repo root (via `git rev-parse --show-toplevel`) to `PYTHONPATH` so `tools/copy_archive_images.py` and other helper scripts can `import protein_image_grader.*` after `source source_me.sh`.
 - Add `protein_image_grader/archive_paths.py` for canonical archive hash paths and legacy path resolution (imported by runtime code).
 - Add `tools/copy_archive_images.py` for copy-only legacy archive migration with a CSV manifest.
 - Update grading, download, duplicate checking, and hash rebuild paths to use archive utilities.

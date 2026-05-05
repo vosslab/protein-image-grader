@@ -243,16 +243,66 @@ def copy_archive_images(
 
 
 #============================================
-def summarize_records(records: list[dict]) -> None:
+def summarize_records(records: list[dict], target_root: pathlib.Path) -> None:
 	"""
-	Print a status summary.
+	Print a status summary plus the target output folder tree with image counts and sizes.
 	"""
-	counts = {}
+	# Aggregate counts by status (would_copy, copied, skipped_existing, conflict, non_image)
+	status_counts = {}
+	status_bytes = {}
+	# Per-target-folder counts and bytes (folder = parent dir of the target file)
+	target_folder_counts = {}
+	target_folder_bytes = {}
+	total_bytes = 0
 	for record in records:
 		status = record["status"]
-		counts[status] = counts.get(status, 0) + 1
-	for status in sorted(counts):
-		print(f"{status}: {counts[status]}")
+		size = record["size_bytes"]
+		status_counts[status] = status_counts.get(status, 0) + 1
+		status_bytes[status] = status_bytes.get(status, 0) + size
+		total_bytes += size
+		if status == "non_image":
+			continue
+		target_path = pathlib.Path(record["target_path"])
+		target_dir = target_path.parent
+		target_folder_counts[target_dir] = target_folder_counts.get(target_dir, 0) + 1
+		target_folder_bytes[target_dir] = target_folder_bytes.get(target_dir, 0) + size
+
+	# Status breakdown
+	print("Status breakdown:")
+	for status in sorted(status_counts):
+		count = status_counts[status]
+		mb = status_bytes[status] / (1024 * 1024)
+		print(f"  {status}: {count} files ({mb:.1f} MB)")
+
+	# Target output tree
+	print(f"\nTarget output tree under {target_root}:")
+	print(f"  ({len(target_folder_counts)} folders, {sum(target_folder_counts.values())} images)\n")
+	# Sort folders by their string path so the tree prints in lexicographic order
+	sorted_folders = sorted(target_folder_counts, key=lambda p: str(p))
+	prev_parts = ()
+	for target_dir in sorted_folders:
+		# Render the path as a tree by indenting each new directory component
+		try:
+			rel_dir = target_dir.relative_to(target_root)
+		except ValueError:
+			rel_dir = target_dir
+		parts = rel_dir.parts
+		# Print any new ancestor segments not already shown
+		for depth in range(len(parts) - 1):
+			if depth >= len(prev_parts) or prev_parts[depth] != parts[depth]:
+				indent = "  " * depth
+				print(f"{indent}{parts[depth]}/")
+		# Print the leaf folder with image count and MB
+		leaf_depth = max(len(parts) - 1, 0)
+		indent = "  " * leaf_depth
+		count = target_folder_counts[target_dir]
+		mb = target_folder_bytes[target_dir] / (1024 * 1024)
+		leaf_name = parts[-1] if parts else str(target_dir)
+		print(f"{indent}{leaf_name}/  -- {count} images ({mb:.1f} MB)")
+		prev_parts = parts
+
+	total_mb = total_bytes / (1024 * 1024)
+	print(f"\nTotal records: {len(records)} ({total_mb:.1f} MB)")
 	return
 
 
@@ -272,7 +322,7 @@ def main():
 		manifest_path,
 		args.copy_files,
 	)
-	summarize_records(records)
+	summarize_records(records, target_root)
 	if args.copy_files is False:
 		print("Dry-run complete. Use --copy to copy files.")
 	return
