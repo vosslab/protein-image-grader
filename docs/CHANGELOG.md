@@ -1,6 +1,22 @@
 # Changelog
 
 ## 2026-05-05
+
+### Additions and New Features
+- Add `start_grading.py` (root entry point + `protein_image_grader/start_grading.py` implementation) as a thin orchestrator that prints a per-image status dashboard and runs one canonical step (`download`, `grade`, or `regrade`) for one image at a time. Auto-imports stray `BCHM_Prot_Img_##-*.csv` files from the repo root into `Protein_Images/semesters/<term>/forms/` via `shutil.move` (`Protein_Images/` is gitignored, so `git mv` is not appropriate). Refuses to overwrite existing destinations and refuses to act when canonical duplicates exist. CLI is intentionally minimal per `docs/PYTHON_STYLE.md`: `-t/--term`, `-i/--image`, `-s/--step {download,grade,regrade}`, `--status-only`. No `--yes`, no `--no-import-root-csvs`, no email/upload step in v1; overwrite confirmation is always interactive.
+- Add `tests/test_start_grading.py` covering auto-import (move, dir creation, refuse overwrite, ignore unrelated files), duplicate detection, dashboard row construction (complete and missing), `compute_next_step` progression, command construction for `download`/`grade` (asserts no `--output-dir` is passed for download), refusal to expose batch helpers, and required-resource enforcement (`forms/` always required, `roster.csv` required only for grade/regrade, `blackboard_assignment_ids.txt` warning-only).
+
+### Behavior or Interface Changes
+- `download_submission_images.py` now writes to the canonical `Protein_Images/semesters/<term>/submissions/download_NN_raw/` when the input CSV lives under `Protein_Images/semesters/<term>/forms/`. The legacy `data/runs/DOWNLOAD_NN_year_YYYY/` default has been removed; the argparse default for `--output-dir` is `None`. An explicit `--output-dir` is honored verbatim. Non-canonical CSV inputs without an explicit `--output-dir` now raise a clear `ValueError` instead of silently falling back to `data/runs/`. New helpers: `extract_image_number_from_csv_basename`, `infer_canonical_output_dir`, `resolve_image_dir`. `profiles_image_NN.html` is written next to `download_NN_raw/` (in the canonical submissions dir) when no override is passed.
+- Drop the unused `build_image_dir` function from `download_submission_images.py`.
+
+### Fixes and Maintenance
+- Add `tests/test_download_output_dir.py` to pin Phase 0 contract: canonical CSV path implies canonical submissions output, explicit `--output-dir` override wins, non-canonical CSV without override errors, image-number/path mismatch errors, and basename parsing rejects non-canonical names.
+
+### Decisions and Failures
+- Auto-import in `start_grading.py` is unconditional (no `--no-import-root-csvs` escape hatch). The user explicitly wants the scripts to maintain canonical structure rather than rely on the user remembering to move files; an opt-out would re-introduce the "where do I start?" confusion this tool is meant to fix.
+- The orchestrator does not expose a `--yes` overwrite-bypass flag. Bypass flags exist mostly to enable scripted batch runs, which are explicitly out of scope: each grading run handles exactly one image assignment in the context of the full image-NN dataset.
+
 - Fix `source_me.sh` to prepend the repo root (via `git rev-parse --show-toplevel`) to `PYTHONPATH` so `tools/copy_archive_images.py` and other helper scripts can `import protein_image_grader.*` after `source source_me.sh`.
 - Add `protein_image_grader/archive_paths.py` for canonical archive hash paths and legacy path resolution (imported by runtime code).
 - Add `tools/copy_archive_images.py` for copy-only legacy archive migration with a CSV manifest.

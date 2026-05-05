@@ -5,6 +5,7 @@ import csv
 import time
 import random
 import shutil
+import pathlib
 import argparse
 
 # PIP3 modules
@@ -17,6 +18,7 @@ import googleapiclient.errors
 import protein_image_grader.rmspaces
 import protein_image_grader.google_drive_image_utils as google_drive_image_utils
 import protein_image_grader.archive_paths as archive_paths
+import protein_image_grader.protein_images_path as protein_images_path
 
 pillow_heif.register_heif_opener()
 
@@ -41,8 +43,12 @@ def parse_args():
 	parser.add_argument('-r', '--rotate', dest='rotate', action='store_true')
 	parser.add_argument('--no-rotate', dest='rotate', action='store_false')
 	parser.set_defaults(rotate=False)
+	# Default is None so main() can infer the canonical
+	# Protein_Images/semesters/<term>/submissions/download_NN_raw/ path from
+	# a canonical input CSV. An explicit override is honored verbatim.
 	parser.add_argument('-o', '--output-dir', dest='output_dir', type=str,
-		help="Output directory for downloads and HTML", default="data/runs")
+		help="Output directory for downloads and HTML (overrides canonical inference)",
+		default=None)
 	parser.add_argument('-p', '--profiles-html', dest='profiles_html', type=str,
 		help="Output HTML file name", default=None)
 	parser.add_argument('--image-number', dest='image_number', default=0,
@@ -51,20 +57,93 @@ def parse_args():
 	return args
 
 #============================================
-def build_image_dir(image_number: int, output_dir: str) -> str:
-	"""
-	Build the output directory for downloaded images.
+# Legacy build_image_dir (DOWNLOAD_NN_year_YYYY/) was removed in Phase 0
+# of the start_grading.py plan; the canonical layout lives under
+# Protein_Images/semesters/<term>/submissions/download_NN_raw/.
 
-	Args:
-		image_number (int): Protein image number.
+#============================================
+# regex: BCHM_Prot_Img_NN-<anything>.csv where NN is two digits 01-20
+CANONICAL_FORM_CSV_RE = re.compile(r'^BCHM_Prot_Img_(\d{2})-.+\.csv$')
 
-	Returns:
-		str: Output folder name.
+
+#============================================
+def extract_image_number_from_csv_basename(basename: str) -> int:
 	"""
-	current_year = time.localtime().tm_year
-	if image_number > 0:
-		return os.path.join(output_dir, f"DOWNLOAD_{image_number:02d}_year_{current_year:04d}")
-	return os.path.join(output_dir, f"DOWNLOAD_images_year_{current_year:04d}")
+	Parse the image number from a canonical form CSV basename.
+
+	Expects the form 'BCHM_Prot_Img_NN-<label>.csv'. Raises ValueError if
+	the name does not match. Pure function; no filesystem access.
+	"""
+	match = CANONICAL_FORM_CSV_RE.match(basename)
+	if match is None:
+		raise ValueError(
+			f"CSV basename does not match BCHM_Prot_Img_NN-*.csv: {basename}"
+		)
+	return int(match.group(1))
+
+
+#============================================
+def infer_canonical_output_dir(csv_path: str) -> pathlib.Path:
+	"""
+	Infer the canonical submissions output dir from a canonical CSV path.
+
+	The CSV must live under
+		<repo>/Protein_Images/semesters/<term>/forms/BCHM_Prot_Img_NN-*.csv
+	in which case this returns
+		<repo>/Protein_Images/semesters/<term>/submissions/download_NN_raw
+
+	Returns None when the CSV path is non-canonical. Pure function except
+	for resolving the path (no directories are created).
+	"""
+	csv_p = pathlib.Path(csv_path).resolve()
+	parts = csv_p.parts
+	# Look for the canonical anchor: .../Protein_Images/semesters/<term>/forms/<file>
+	if len(parts) < 5:
+		return None
+	if parts[-2] != protein_images_path.FORMS_SUBDIR:
+		return None
+	if parts[-4] != protein_images_path.SEMESTERS_SUBDIR:
+		return None
+	if parts[-5] != protein_images_path.PROTEIN_IMAGES_NAME:
+		return None
+	term = parts[-3]
+	image_number = extract_image_number_from_csv_basename(csv_p.name)
+	submissions_dir = protein_images_path.get_submissions_dir(term)
+	return submissions_dir / f"download_{image_number:02d}_raw"
+
+
+#============================================
+def resolve_image_dir(csvfile: str, output_dir_override: str | None,
+		image_number: int) -> str:
+	"""
+	Resolve where downloaded images for this run should land.
+
+	Rules (Phase 0 of the start_grading.py plan):
+	- If output_dir_override is given, honor it verbatim (no rewrites).
+	- Else, infer the canonical
+	  Protein_Images/semesters/<term>/submissions/download_NN_raw/ from the
+	  CSV path. If the CSV is not canonical, raise a clear error.
+	"""
+	if output_dir_override is not None:
+		return output_dir_override
+	canonical = infer_canonical_output_dir(csvfile)
+	if canonical is None:
+		message = (
+			"Cannot infer canonical output dir from non-canonical CSV path:\n"
+			f"  {csvfile}\n"
+			"Move the CSV to Protein_Images/semesters/<term>/forms/, or pass\n"
+			"--output-dir explicitly."
+		)
+		raise ValueError(message)
+	# image_number is checked against the inferred dir for safety; mismatch
+	# means the caller passed --image-number that disagrees with the CSV.
+	expected_suffix = f"download_{image_number:02d}_raw"
+	if canonical.name != expected_suffix:
+		raise ValueError(
+			f"Image number {image_number} disagrees with canonical CSV path"
+			f" (expected dir suffix {expected_suffix}, got {canonical.name})"
+		)
+	return str(canonical)
 
 #============================================
 def get_image_html_tag(image_url: str, ruid: int, args, image_dir: str,
@@ -443,20 +522,24 @@ def main():
 	"""
 	args = parse_args()
 
-	if not os.path.isdir(args.output_dir):
-		os.makedirs(args.output_dir)
-
 	header, data_tree = read_csv(args.csvfile, args.maxstudents)
 
 	if args.image_number == 0:
 		args.image_number = extract_number_in_range(args.csvfile)
-	image_dir = build_image_dir(args.image_number, args.output_dir)
+
+	# Phase 0 (start_grading.py plan): canonical CSVs imply canonical output
+	# under Protein_Images/semesters/<term>/submissions/download_NN_raw/.
+	# Non-canonical CSVs require an explicit --output-dir.
+	image_dir = resolve_image_dir(args.csvfile, args.output_dir, args.image_number)
 	if not os.path.isdir(image_dir):
 		os.makedirs(image_dir)
 
+	# profiles_html lands in the parent of image_dir so the canonical layout
+	# keeps each image's profile page next to its download_NN_raw folder.
 	if args.profiles_html is None:
+		profiles_parent = os.path.dirname(image_dir)
 		args.profiles_html = os.path.join(
-			args.output_dir, f"profiles_image_{args.image_number:02d}.html")
+			profiles_parent, f"profiles_image_{args.image_number:02d}.html")
 
 	archive_dir = get_archive_assignment_dir(args.image_number, "spec_yaml_files")
 
