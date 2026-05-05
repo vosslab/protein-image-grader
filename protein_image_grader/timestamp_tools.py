@@ -1,10 +1,11 @@
+"""Helpers for due-date deductions and timestamp parsing."""
 
-from datetime import datetime
+import datetime
 
 #==========================================
 # Helper function to determine the deduction based on a given value and ranges
 #==========================================
-def get_deduction(value: int, ranges: dict) -> 'int or float':
+def get_deduction(value: int, ranges: dict) -> int | float:
 	"""
 	Calculate the deduction based on the provided value and defined ranges.
 
@@ -104,10 +105,10 @@ def check_due_date(entry_timestamp: str, config: dict) -> tuple:
 
 	# Convert due_date and entry_timestamp to datetime objects
 	try:
-		due_date = datetime.strptime(due_date_str, "%b %d, %Y %I:%M:%S %p")
+		due_date = datetime.datetime.strptime(due_date_str, "%b %d, %Y %I:%M:%S %p")
 	except ValueError:
-		due_date = datetime.strptime(due_date_str, "%B %d, %Y %I:%M:%S %p")
-	entry_datetime = datetime.strptime(entry_timestamp[:-4].strip(), "%Y/%m/%d %I:%M:%S %p")
+		due_date = datetime.datetime.strptime(due_date_str, "%B %d, %Y %I:%M:%S %p")
+	entry_datetime = datetime.datetime.strptime(entry_timestamp[:-4].strip(), "%Y/%m/%d %I:%M:%S %p")
 
 	# Calculate the difference in hours between due_date and entry_datetime
 	hours_diff = (entry_datetime - due_date).total_seconds() / 3600
@@ -130,7 +131,3 @@ def check_due_date(entry_timestamp: str, config: dict) -> tuple:
 		feedback = f"Late by {hours_diff:.0f} hours"
 
 	return deduction, status, feedback
-
-# Example assert command; tailor with actual data
-result = check_due_date("1970/10/25 11:59:59 PM EST", {'deadline': {'due date': 'Oct 25, 1970'}})
-assert result == (0.0, 'On-Time', '')

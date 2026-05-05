@@ -1,17 +1,21 @@
+# Standard Library
 import os
 import re
-import yaml
-from rich.console import Console
-from rich.style import Style
-from collections import defaultdict
+import collections
 
+# PIP3 modules
+import yaml
+import rich.console
+import rich.style
+
+# local repo modules
 import protein_image_grader.student_id_protein as student_id_protein
 import protein_image_grader.archive_paths as archive_paths
 
-console = Console()
-warning_color = Style(color="rgb(255, 187, 51)")  # RGB for bright orange
-question_color = Style(color="rgb(100, 149, 237)" )  # RGB for cornflower blue
-data_color = Style(color="rgb(187, 51, 255)")  # RGB for purple
+console = rich.console.Console()
+warning_color = rich.style.Style(color="rgb(255, 187, 51)")  # RGB for bright orange
+question_color = rich.style.Style(color="rgb(100, 149, 237)" )  # RGB for cornflower blue
+data_color = rich.style.Style(color="rgb(187, 51, 255)")  # RGB for purple
 
 #============================================
 def hex_to_bin(hex_string: str) -> str:
@@ -133,8 +137,8 @@ def fill_local_image_hashes(student_tree: list) -> dict:
 	"""
 
 	local_image_hashes = {}
-	local_image_hashes['md5'] = defaultdict(list)
-	local_image_hashes['phash'] = defaultdict(list)
+	local_image_hashes['md5'] = collections.defaultdict(list)
+	local_image_hashes['phash'] = collections.defaultdict(list)
 	total_hashes = 0
 	for student_entry in student_tree:
 		md5hash = student_entry['128-bit MD5 Hash']
@@ -159,7 +163,7 @@ def dfs(node, graph, visited, component):
 def get_non_overlapping_group_sets(list_of_sets):
 	"""Builds a graph and finds connected components to get non-overlapping groups."""
 	# Step 1: Build the adjacency list (graph)
-	graph = defaultdict(set)
+	graph = collections.defaultdict(set)
 	for group_set in list_of_sets:
 		for file1 in group_set:
 			for file2 in group_set:

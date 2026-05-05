@@ -7,4 +7,5 @@ py-applescript
 pyyaml
 requests
 rich
+transliterate
 unidecode

@@ -82,19 +82,6 @@ def parse_args() -> argparse.Namespace:
 	parser.set_defaults(interactive=True)
 	parser.set_defaults(require_match=False)
 
-	match_group.add_argument(
-		"-t", "--threshold", dest="auto_threshold", type=float, default=0.88,
-		help="Auto-accept similarity threshold (0 to 1)",
-	)
-	match_group.add_argument(
-		"-g", "--gap", dest="auto_gap", type=float, default=0.06,
-		help="Auto-accept requires top score exceed runner-up by this gap",
-	)
-	match_group.add_argument(
-		"-c", "--candidates", dest="candidate_count", type=int, default=5,
-		help="Number of candidates to show during interactive review",
-	)
-
 	return parser.parse_args()
 
 
@@ -519,7 +506,7 @@ def prompt_choice(sub: dict, candidates: list[tuple[int, float]], roster: dict[i
 
 	value = input("Select match number (0 for no match): ").strip()
 	if value.strip().lower() in ("q", "quit", "exit"):
-		raise SystemExit("Aborted by user. Fix roster or rerun allowing unmatched.")
+		raise RuntimeError("Aborted by user. Fix roster or rerun allowing unmatched.")
 	choice = safe_int(value)
 	if choice is None:
 		return None
@@ -551,7 +538,7 @@ def prompt_manual_student_id(sub: dict, roster: dict[int, dict], allow_no_match:
 			value = input("Enter Student ID (q to quit): ").strip()
 
 		if value.strip().lower() in ("q", "quit", "exit"):
-			raise SystemExit("Aborted by user. Fix roster or rerun allowing unmatched.")
+			raise RuntimeError("Aborted by user. Fix roster or rerun allowing unmatched.")
 		choice = safe_int(value)
 		if choice is None:
 			print("Invalid Student ID. Try again.")
@@ -682,9 +669,6 @@ def main() -> None:
 		roster=roster,
 		interactive=args.interactive,
 		require_match=getattr(args, "require_match", False),
-		auto_threshold=args.auto_threshold,
-		auto_gap=args.auto_gap,
-		candidate_count=args.candidate_count,
 	)
 	rows, header, delimiter = read_submission_rows(args.input_csv)
 

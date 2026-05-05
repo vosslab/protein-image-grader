@@ -1,6 +1,5 @@
 import os
 import stat
-from typing import Optional
 
 import git_file_utils
 
@@ -207,7 +206,7 @@ def categorize_errors() -> dict[str, list[str]]:
 
 
 #============================================
-def format_errors(errors: dict[str, list[str]], limit: Optional[int] = 10) -> str:
+def format_errors(errors: dict[str, list[str]], limit: int | None = 10) -> str:
 	"""
 	Format error categories for assertion output.
 

@@ -5,7 +5,7 @@ import pathlib
 import subprocess
 
 # local repo modules
-import protein_image_grader.commonlib as commonlib
+import protein_image_grader.rmspaces
 
 ARCHIVE_ROOT_NAME = "archive"
 ARCHIVE_IMAGES_NAME = "ARCHIVE_IMAGES"
@@ -104,8 +104,7 @@ def make_assignment_archive_folder(image_number: int, assignment_name: str | Non
 	"""
 	folder = f"BCHM_Prot_Img_{image_number:02d}"
 	if assignment_name:
-		clib = commonlib.CommonLib()
-		clean_name = clib.cleanName(assignment_name)
+		clean_name = protein_image_grader.rmspaces.cleanName(assignment_name)
 		if clean_name:
 			folder = f"{folder}_{clean_name}"
 	return folder

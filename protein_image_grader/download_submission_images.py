@@ -8,17 +8,17 @@ import shutil
 import argparse
 
 # PIP3 modules
-import PIL.Image
-import googleapiclient.errors
-from pillow_heif import register_heif_opener
 import yaml
+import PIL.Image
+import pillow_heif
+import googleapiclient.errors
 
 # local repo modules
-import protein_image_grader.commonlib as commonlib
+import protein_image_grader.rmspaces
 import protein_image_grader.google_drive_image_utils as google_drive_image_utils
 import protein_image_grader.archive_paths as archive_paths
 
-register_heif_opener()
+pillow_heif.register_heif_opener()
 
 fail_count = 0
 
@@ -151,10 +151,9 @@ def format_filename(original_filename: str, ruid: int, args) -> str:
 	Returns:
 		str: Normalized and extended filename
 	"""
-	clib = commonlib.CommonLib()
 	filename = original_filename.lower()
 	basename = os.path.splitext(filename)[0]
-	basename = clib.cleanName(basename)
+	basename = protein_image_grader.rmspaces.cleanName(basename)
 	extension = os.path.splitext(filename)[-1]
 	filename = f"{ruid}-protein{args.image_number:02d}-{basename}{extension}"
 	if not filename.endswith('.jpg') and not filename.endswith('.png'):

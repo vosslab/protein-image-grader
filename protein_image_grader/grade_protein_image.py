@@ -1,17 +1,19 @@
-#length, then alphabetical ordering of import statements
+# Standard Library
 import os
 import glob
-import shutil
 import time
-import yaml
+import shutil
 import fnmatch
 import argparse
 from types import MappingProxyType
 
-from rich.console import Console
-from rich.style import Style
-from rich.table import Table
+# PIP3 modules
+import yaml
+import rich.table
+import rich.style
+import rich.console
 
+# local repo modules
 import protein_image_grader.duplicate_processing as duplicate_processing
 import protein_image_grader.file_io_protein as file_io_protein
 import protein_image_grader.interactive_image_criteria_class as interactive_image_criteria_class
@@ -21,10 +23,10 @@ import protein_image_grader.timestamp_tools as timestamp_tools
 import protein_image_grader.download_submission_images as download_submission_images
 import protein_image_grader.archive_paths as archive_paths
 
-console = Console()
-warning_color = Style(color="rgb(255, 187, 51)" )  # RGB for bright orange
-question_color = Style(color="rgb(100, 149, 237)" )  # RGB for cornflower blue
-data_color = Style(color="rgb(187, 51, 255)" )  # RGB for purple
+console = rich.console.Console()
+warning_color = rich.style.Style(color="rgb(255, 187, 51)" )  # RGB for bright orange
+question_color = rich.style.Style(color="rgb(100, 149, 237)" )  # RGB for cornflower blue
+data_color = rich.style.Style(color="rgb(187, 51, 255)" )  # RGB for purple
 
 #==========================================
 # Get List of Accepted Answers for a Given Question
@@ -337,13 +339,6 @@ def get_final_score(student_entry: dict, read_only_config_dict: dict) -> None:
 	student_entry["Final Score"] = score_str
 	student_entry[read_only_config_dict['assignment name']] = score_str
 
-# Simple assertion test for the function. Replace with actual data for real-world use.
-# This assumes that the function correctly updates student_entry dictionary in-place.
-test_entry = {}
-test_config = {'total points': '100', 'assignment name': 'HW1'}
-get_final_score(test_entry, test_config)
-assert test_entry['Final Score'] == '100.00'
-
 
 #==========================================
 #==========================================
@@ -473,7 +468,7 @@ def display_info(params: dict):
 	Args:
 		params (dict): Dictionary containing file paths and image number.
 	"""
-	table = Table(show_header=True, header_style="bold magenta")
+	table = rich.table.Table(show_header=True, header_style="bold magenta")
 
 	table.add_column("Name", style="dim", width=20)
 	table.add_column("Value", justify="left")

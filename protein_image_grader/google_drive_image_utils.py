@@ -6,17 +6,19 @@ import random
 import hashlib
 import urllib.parse
 
-# PIP modules
-import imagehash
+# PIP3 modules
 import requests
+import imagehash
 import PIL.Image
-from PIL import Image
-from PIL import ImageChops
+import PIL.ImageChops
 
 #pip3 install google-api-python-client
 import googleapiclient.http
 import googleapiclient.discovery
-from google.oauth2.service_account import Credentials
+import google.oauth2.service_account
+
+# local repo modules
+import protein_image_grader.rmspaces
 
 # Extended list of named colors and their RGB values
 NAMED_COLORS = {
@@ -113,18 +115,18 @@ def get_drive_service():
 		return DRIVE_SERVICE
 	api_key_file = find_service_key_file()
 	scopes = ['https://www.googleapis.com/auth/drive.readonly']
-	credentials = Credentials.from_service_account_file(api_key_file, scopes=scopes)
+	credentials = google.oauth2.service_account.Credentials.from_service_account_file(api_key_file, scopes=scopes)
 	DRIVE_SERVICE = googleapiclient.discovery.build('drive', 'v3', credentials=credentials)
 	return DRIVE_SERVICE
 
 #============================================
 
-def get_background_color(image: Image.Image) -> tuple:
+def get_background_color(image) -> tuple:
 	"""
 	Determine the background color by sampling 16 pixels near the four corners.
 
 	Args:
-		image (Image.Image): A PIL Image object.
+		image (PIL.Image.Image): A PIL Image object.
 
 	Returns:
 		tuple: The most common background color from the sampled pixels.
@@ -154,39 +156,39 @@ def get_background_color(image: Image.Image) -> tuple:
 
 #============================================
 
-def rotate_if_tall(image: Image.Image) -> Image.Image:
+def rotate_if_tall(image):
 	"""
 	Rotates the image 90 degrees clockwise if its height is greater than its width.
 
 	Args:
-		image (Image.Image): A PIL Image object.
+		image (PIL.Image.Image): A PIL Image object.
 
 	Returns:
 		Image.Image: The rotated image if needed, otherwise the original image.
 	"""
 	if image.height > image.width:
 		# Use transpose for lossless rotation
-		return image.transpose(Image.Transpose.ROTATE_90)  # 90 degrees clockwise
+		return image.transpose(PIL.Image.Transpose.ROTATE_90)  # 90 degrees clockwise
 
 	return image  # No rotation needed
 
 #============================================
 
-def trim(image: Image.Image, tolerance: int = 0) -> Image.Image:
+def trim(image, tolerance: int = 0):
 	"""
 	Trims borders around an image based on the background color.
 
 	Args:
-		image (Image.Image): A PIL Image object to be trimmed.
+		image (PIL.Image.Image): A PIL Image object to be trimmed.
 		tolerance (int): How much variation in color is allowed (default 0).
 
 	Returns:
 		Image.Image: A trimmed PIL Image object.
 	"""
 	bg_color = get_background_color(image)  # Get the most common corner color
-	bg = Image.new(image.mode, image.size, bg_color)  # Create a solid background
-	diff = ImageChops.difference(image, bg)  # Find differences
-	diff = ImageChops.add(diff, diff, 2.0, -tolerance)  # Enhance differences
+	bg = PIL.Image.new(image.mode, image.size, bg_color)  # Create a solid background
+	diff = PIL.ImageChops.difference(image, bg)  # Find differences
+	diff = PIL.ImageChops.add(diff, diff, 2.0, -tolerance)  # Enhance differences
 	bbox = diff.getbbox()
 
 	if bbox:
@@ -196,12 +198,12 @@ def trim(image: Image.Image, tolerance: int = 0) -> Image.Image:
 
 #============================================
 
-def multi_trim(image: Image.Image, tolerance: int = 3) -> Image.Image:
+def multi_trim(image, tolerance: int = 3):
 	"""
 	Iteratively trims an image until its dimensions no longer change.
 
 	Args:
-		image (Image.Image): A PIL Image object to be trimmed.
+		image (PIL.Image.Image): A PIL Image object to be trimmed.
 		tolerance (int): How much variation in color is allowed when trimming.
 
 	Returns:
@@ -345,9 +347,6 @@ def get_file_id_from_google_drive_url(image_url: str) -> str:
 		return None
 
 	return file_id
-# Simple assertion test for the function: 'normalize_google_drive_url'
-result = get_file_id_from_google_drive_url("https://drive.google.com/u/2/open?usp=forms_web&id=1QCHoMnqKvf6gqLI272ZQ4IGBCFupnC6s")
-assert result == "1QCHoMnqKvf6gqLI272ZQ4IGBCFupnC6s"
 
 #============================================
 
@@ -451,11 +450,7 @@ def download_image(file_id):
 		print(file_metadata)
 		filename = filename + "." + mime_parts[1]
 		#raise TypeError
-	try:
-		import rmspaces
-		filename = rmspaces.cleanName(filename)
-	except ImportError:
-		pass
+	filename = protein_image_grader.rmspaces.cleanName(filename)
 
 	# Use an in-memory byte stream to hold the downloaded file
 	file_data = io.BytesIO()

@@ -1,16 +1,20 @@
+# Standard Library
 import sys
 import time
-from rich.console import Console
-from rich.style import Style
 
+# PIP3 modules
+import rich.style
+import rich.console
+
+# local repo modules
 import protein_image_grader.file_io_protein as file_io_protein
 import protein_image_grader.student_id_protein as student_id_protein
 
-console = Console()
-warning_color = Style(color="rgb(255, 187, 51)")  # RGB for bright orange
-question_color = Style(color="rgb(100, 149, 237)" )  # RGB for cornflower blue
-data_color = Style(color="rgb(187, 51, 255)")  # RGB for purple
-brown_color = Style(color="rgb(153, 102, 51)")  # RGB for purple
+console = rich.console.Console()
+warning_color = rich.style.Style(color="rgb(255, 187, 51)")  # RGB for bright orange
+question_color = rich.style.Style(color="rgb(100, 149, 237)" )  # RGB for cornflower blue
+data_color = rich.style.Style(color="rgb(187, 51, 255)")  # RGB for purple
+brown_color = rich.style.Style(color="rgb(153, 102, 51)")  # RGB for purple
 
 #============================
 class process_image_questions_class():

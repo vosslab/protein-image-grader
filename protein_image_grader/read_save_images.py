@@ -1,18 +1,23 @@
+# Standard Library
 import os
 import glob
 import shutil
-import protein_image_grader.commonlib as commonlib
+
+# PIP3 modules
 import yaml
-from rich.console import Console
-from rich.style import Style
-from PIL import Image
+import PIL.Image
+import rich.style
+import rich.console
+
+# local repo modules
+import protein_image_grader.rmspaces
 import protein_image_grader.google_drive_image_utils as google_drive_image_utils
 import protein_image_grader.student_id_protein as student_id_protein
 import protein_image_grader.archive_paths as archive_paths
 
-console = Console()
-warning_color = Style(color="rgb(255, 187, 51)")  # RGB for bright orange
-data_color = Style(color="rgb(187, 51, 255)")  # RGB for purple
+console = rich.console.Console()
+warning_color = rich.style.Style(color="rgb(255, 187, 51)")  # RGB for bright orange
+data_color = rich.style.Style(color="rgb(187, 51, 255)")  # RGB for purple
 
 download_count = 0
 
@@ -20,7 +25,6 @@ download_count = 0
 def get_image_data(student_entry: dict, params: dict):
 	"""Download or load an image from cache, ensuring consistency."""
 	global download_count
-	clib = commonlib.CommonLib()
 
 	image_url = student_entry.get('image url')
 	if image_url is None:
@@ -44,7 +48,7 @@ def get_image_data(student_entry: dict, params: dict):
 		print(f"original_filename = {original_filename}")
 		filename = original_filename.lower()
 		basename = os.path.splitext(filename)[0]
-		basename = clib.cleanName(basename)
+		basename = protein_image_grader.rmspaces.cleanName(basename)
 		extension = os.path.splitext(filename)[-1]
 		output_filename = f"{output_filename_prefix}{basename}{extension}"
 		print(f"output_filename = {output_filename}")
@@ -70,7 +74,7 @@ def create_image_dict(image_data, original_filename, output_filename):
 
 	md5hash, phash = google_drive_image_utils.get_hash_data(image_data)
 	image_data.seek(0)
-	pil_image = Image.open(image_data)
+	pil_image = PIL.Image.open(image_data)
 
 	image_format = pil_image.format
 	image_mode = pil_image.mode
@@ -117,8 +121,6 @@ def download_and_process_image(student_entry: dict, params: dict) -> dict:
 #============================================
 def generate_output_filename(student_entry: dict, filename: str, params: dict) -> str:
 	"""Generate a sanitized output filename for the student's image."""
-	clib = commonlib.CommonLib()
-
 	# Convert filename to lowercase
 	filename = filename.lower()
 
@@ -128,7 +130,7 @@ def generate_output_filename(student_entry: dict, filename: str, params: dict) -
 
 	# Clean filename and extract extension
 	basename = os.path.splitext(filename)[0]
-	basename = clib.cleanName(basename)
+	basename = protein_image_grader.rmspaces.cleanName(basename)
 	extension = os.path.splitext(filename)[-1]
 
 	# Construct the output filename

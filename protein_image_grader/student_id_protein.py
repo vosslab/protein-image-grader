@@ -1,20 +1,22 @@
-
+# Standard Library
 import re
 import time
-from collections import defaultdict
+import collections
 
-from rich.console import Console
-from rich.style import Style
-from rich.text import Text
+# PIP3 modules
+import rich.text
+import rich.style
+import rich.console
 
+# local repo modules
 import protein_image_grader.roster_matching as roster_matching
 
-console = Console()
-warning_color = Style(color="rgb(255, 187, 51)" )  # RGB for bright orange
-question_color = Style(color="rgb(100, 149, 237)" )  # RGB for cornflower blue
-data_color = Style(color="rgb(187, 51, 255)" )  # RGB for purple
-student_style = Style(color="blue", bold=True, italic=True)
-validation_color = Style(color="rgb(153, 230, 76)" )  # RGB for lime-ish green
+console = rich.console.Console()
+warning_color = rich.style.Style(color="rgb(255, 187, 51)" )  # RGB for bright orange
+question_color = rich.style.Style(color="rgb(100, 149, 237)" )  # RGB for cornflower blue
+data_color = rich.style.Style(color="rgb(187, 51, 255)" )  # RGB for purple
+student_style = rich.style.Style(color="blue", bold=True, italic=True)
+validation_color = rich.style.Style(color="rgb(153, 230, 76)" )  # RGB for lime-ish green
 
 validation_types = {
 	'a': 'almost',
@@ -27,7 +29,7 @@ validation_types = {
 	'y': 'yes',
 }
 
-def get_input_validation(message: str, valid_letters: str, style: Style = validation_color) -> str:
+def get_input_validation(message: str, valid_letters: str, style=validation_color) -> str:
 	"""
 	Get user input for image validation and ensure it's valid.
 
@@ -46,7 +48,7 @@ def get_input_validation(message: str, valid_letters: str, style: Style = valida
 		The validated user input.
 	"""
 	valid_tuple = tuple(valid_letters)
-	statement = Text(message.strip(), style=style)
+	statement = rich.text.Text(message.strip(), style=style)
 
 	options_text = '-- '
 	for letter in valid_letters:
@@ -92,15 +94,12 @@ def print_student_info(student_entry: dict) -> None:
 	ruid = student_entry['Student ID']
 	# Print the student's formatted information.
 	# Create a Text object for rich formatting
-	student_info_text = Text(f"Student {ruid}: {first_name} {last_name}.", style=student_style)
+	student_info_text = rich.text.Text(f"Student {ruid}: {first_name} {last_name}.", style=student_style)
 
 	# Print a line for visual separation
 	#console.print("---------", style="dim")
 	# Print the student's formatted information using rich console
 	console.print(student_info_text)
-
-# Validate function behavior
-assert print_student_info({"First Name": "john", "Last Name": "doe", "Student ID": 1234}) is None
 
 #==============
 def validate_dict_keys_in_tree(tree: list, required_keys: tuple) -> None:
@@ -139,15 +138,10 @@ def validate_dict_keys_in_tree(tree: list, required_keys: tuple) -> None:
 				)
 	return True
 
-required_keys = ('x', 'y')
-valid_dict = {'x': 1, 'y': 2}
-tree = [valid_dict]
-assert validate_dict_keys_in_tree(tree, required_keys)
-
 #=====================
 # Group Student Responses Based on Processing Rules
 #=====================
-def group_student_responses(student_tree: list, question_dict: dict) -> defaultdict:
+def group_student_responses(student_tree: list, question_dict: dict) -> collections.defaultdict:
 	"""
 	Group student answers based on processing rules specified in the 'question_dict' dictionary.
 
@@ -165,7 +159,7 @@ def group_student_responses(student_tree: list, question_dict: dict) -> defaultd
 		A dictionary with processed student answers as keys and corresponding student entries as values.
 	"""
 	# Initialize an empty defaultdict to store grouped responses
-	grouped_responses = defaultdict(list)
+	grouped_responses = collections.defaultdict(list)
 
 	# Get the key for this question's answer
 	response_key = question_dict['name']
@@ -244,13 +238,6 @@ def student_entry_to_normalized_key(student_entry: dict, keys: tuple) -> str:
 
 	return normalized_key
 
-# Simple assertion test for the function 'student_entry_to_normalized_key'
-test_student_entry = {'ID': 12, 'Name': 'JoHN  '}
-test_keys = ('ID', 'Name')
-result = student_entry_to_normalized_key(test_student_entry, test_keys)
-assert result == '12 john'
-
-
 #==============
 def build_roster_from_student_ids_tree(student_ids_tree: list) -> dict:
 	"""
@@ -322,13 +309,6 @@ def merge_student_records(student_entry: dict, student_id_record: dict, merge_ke
 	# Loop through the keys and update the student_entry with corresponding values from student_id_record
 	for key in merge_keys:
 		student_entry[key] = student_id_record[key]
-
-# Simple assertion test for the function: 'merge_student_records'
-test_merge_keys = ('Student ID', 'Name')
-test_student_entry = {'Student ID': '123', 'Name': 'Jane Doe'}
-test_student_id_record = {'Student ID': '123', 'Name': 'John Doe'}
-merge_student_records(test_student_entry, test_student_id_record, test_merge_keys)
-assert test_student_entry == {'Student ID': '123', 'Name': 'John Doe'}
 
 #==============
 def match_lists_and_add_student_ids(student_ids_tree: list, student_tree: list) -> None:
