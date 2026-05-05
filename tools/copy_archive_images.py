@@ -12,6 +12,7 @@ import argparse
 
 # local repo modules
 import protein_image_grader.archive_paths as archive_paths
+import protein_image_grader.protein_images_path as protein_images_path
 
 IMAGE_EXTENSIONS = {
 	".png",
@@ -36,8 +37,11 @@ def parse_args():
 	parser.add_argument(
 		"-s", "--source-archive",
 		dest="source_archive",
-		default="ARCHIVE_IMAGES",
-		help="PATH_TO_OLD_ARCHIVE_IMAGES",
+		default=None,
+		help=(
+			"Source archive directory. Defaults to the canonical "
+			"Protein_Images/image_bank/ resolved via the helper."
+		),
 	)
 	parser.add_argument(
 		"-r", "--target-root",
@@ -145,7 +149,7 @@ def build_target_path(
 	Build the canonical target path for one source file.
 	"""
 	relative_path = source_file.relative_to(source_archive)
-	target_path = target_root / term / archive_paths.ARCHIVE_IMAGES_NAME / relative_path
+	target_path = target_root / term / archive_paths.IMAGE_BANK_NAME / relative_path
 	return target_path
 
 
@@ -312,7 +316,10 @@ def main():
 	Run the copy migration tool.
 	"""
 	args = parse_args()
-	source_archive = pathlib.Path(args.source_archive)
+	if args.source_archive is None:
+		source_archive = protein_images_path.get_image_bank_dir()
+	else:
+		source_archive = pathlib.Path(args.source_archive)
 	target_root = pathlib.Path(args.target_root)
 	manifest_path = build_manifest_path(target_root, args.term, args.manifest)
 	records = copy_archive_images(

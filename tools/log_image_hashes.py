@@ -82,14 +82,14 @@ def parse_args():
 
 
 #============================================
-def collect_archive_images(archive_root: str) -> list:
+def collect_image_bank(archive_root: str) -> list:
 	"""
-	Collect image files below ARCHIVE_IMAGES folders.
+	Collect image files below image_bank/ folders (canonical name).
 	"""
 	image_files = []
 	for root, dirs, files in os.walk(archive_root):
 		dirs.sort()
-		if 'ARCHIVE_IMAGES' not in root.split(os.sep):
+		if 'image_bank' not in root.split(os.sep):
 			continue
 		for file in sorted(files):
 			full_path = os.path.join(root, file)
@@ -112,7 +112,7 @@ def rebuild_hashes(archive_root: str) -> dict:
 		raise ValueError(f"Archive directory not found: {archive_root}")
 
 	# Iterate over each file in the archive images folders
-	image_files = collect_archive_images(archive_root)
+	image_files = collect_image_bank(archive_root)
 	summarize_extensions(image_files)
 	for filepath in image_files:
 		print(filepath)

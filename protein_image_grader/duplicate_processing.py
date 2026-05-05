@@ -247,7 +247,7 @@ def find_similar_duplicates(student_tree: list, image_hashes: dict, local_image_
 			if os.path.isfile(resolved_path):
 				open_files.append(str(resolved_path))
 				continue
-			if path.startswith("ARCHIVE_IMAGES/") or path.startswith("archive/"):
+			if path.startswith("image_bank/") or path.startswith("archive/"):
 				console.print(
 					f"WARNING: archive image file not found: {path}",
 					style=warning_color

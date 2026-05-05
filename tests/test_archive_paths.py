@@ -33,21 +33,38 @@ def test_normalize_canonical_path(tmp_path: pathlib.Path) -> None:
 	Check canonical archive path normalization.
 	"""
 	repo_root = tmp_path
-	input_path = repo_root / "archive" / "2026_1Spring" / "ARCHIVE_IMAGES" / "A" / "x.png"
+	input_path = repo_root / "archive" / "2026_1Spring" / "image_bank" / "A" / "x.png"
 	result = archive_paths.normalize_hash_path(str(input_path), repo_root)
-	assert result == "archive/2026_1Spring/ARCHIVE_IMAGES/A/x.png"
+	assert result == "archive/2026_1Spring/image_bank/A/x.png"
 
 
 #============================================
-def test_normalize_legacy_archive_images_path(tmp_path: pathlib.Path) -> None:
+def test_normalize_legacy_image_bank_path_rewrites_to_canonical(
+	tmp_path: pathlib.Path,
+) -> None:
 	"""
-	Check legacy ARCHIVE_IMAGES paths normalize to legacy_import.
+	Legacy bare ARCHIVE_IMAGES/ paths rewrite to canonical image_bank/.
 	"""
 	result = archive_paths.normalize_hash_path(
 		"ARCHIVE_IMAGES\\BCHM_Prot_Img_04\\x.png",
 		tmp_path,
 	)
-	assert result == "archive/legacy_import/ARCHIVE_IMAGES/BCHM_Prot_Img_04/x.png"
+	assert result == "image_bank/BCHM_Prot_Img_04/x.png"
+
+
+#============================================
+def test_normalize_legacy_per_term_path_rewrites_to_canonical(
+	tmp_path: pathlib.Path,
+) -> None:
+	"""
+	Legacy per-term archive/<term>/ARCHIVE_IMAGES/ paths rewrite to canonical
+	archive/<term>/image_bank/.
+	"""
+	result = archive_paths.normalize_hash_path(
+		"archive/2026_1Spring/ARCHIVE_IMAGES/X/y.png",
+		tmp_path,
+	)
+	assert result == "archive/2026_1Spring/image_bank/X/y.png"
 
 
 #============================================
@@ -61,22 +78,39 @@ def test_normalize_outside_repo_raises(tmp_path: pathlib.Path) -> None:
 
 
 #============================================
-def test_resolve_legacy_symlink_path(tmp_path: pathlib.Path) -> None:
+def test_resolve_external_archive_routes_through_helper(
+	tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
 	"""
-	Check legacy paths resolve through repo-root ARCHIVE_IMAGES when present.
+	Bare image_bank/<rel> resolves through the Synology helper.
 	"""
-	legacy_file = tmp_path / "ARCHIVE_IMAGES" / "A" / "x.png"
-	legacy_file.parent.mkdir(parents=True)
-	legacy_file.write_bytes(b"image")
-	result = archive_paths.resolve_archive_path("ARCHIVE_IMAGES/A/x.png", tmp_path)
-	assert result == legacy_file
+	import protein_image_grader.protein_images_path as protein_images_path
+	# Build a fake data root with image_bank/.
+	data_root = tmp_path / "Protein_Images"
+	data_root.mkdir()
+	(data_root / "image_bank").mkdir()
+	monkeypatch.setattr(
+		archive_paths, "get_repo_root",
+		lambda start_path=None: tmp_path,
+	)
+	result = archive_paths.resolve_archive_path("image_bank/A/x.png", tmp_path)
+	expected = (data_root / "image_bank" / "A" / "x.png").resolve()
+	assert result.resolve() == expected
+	# Also confirm legacy ARCHIVE_IMAGES/... is rewritten and resolved the same way.
+	result_legacy = archive_paths.resolve_archive_path(
+		"ARCHIVE_IMAGES/A/x.png", tmp_path,
+	)
+	assert result_legacy.resolve() == expected
+	_ = protein_images_path  # keep import side-effect explicit
 
 
 #============================================
-def test_resolve_legacy_fallback_path(tmp_path: pathlib.Path) -> None:
+def test_resolve_per_term_path(tmp_path: pathlib.Path) -> None:
 	"""
-	Check legacy paths fall back to archive/legacy_import.
+	archive/<term>/... paths resolve under the repo root.
 	"""
-	result = archive_paths.resolve_archive_path("ARCHIVE_IMAGES/A/x.png", tmp_path)
-	expected = tmp_path / "archive" / "legacy_import" / "ARCHIVE_IMAGES" / "A" / "x.png"
+	result = archive_paths.resolve_archive_path(
+		"archive/2026_1Spring/image_bank/A/x.png", tmp_path,
+	)
+	expected = tmp_path / "archive" / "2026_1Spring" / "image_bank" / "A" / "x.png"
 	assert result == expected

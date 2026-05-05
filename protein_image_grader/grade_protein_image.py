@@ -22,6 +22,7 @@ import protein_image_grader.student_id_protein as student_id_protein
 import protein_image_grader.timestamp_tools as timestamp_tools
 import protein_image_grader.download_submission_images as download_submission_images
 import protein_image_grader.archive_paths as archive_paths
+import protein_image_grader.protein_images_path as protein_images_path
 
 console = rich.console.Console()
 warning_color = rich.style.Style(color="rgb(255, 187, 51)" )  # RGB for bright orange
@@ -356,12 +357,11 @@ def parse_args() -> None:
 	parser.set_defaults(make_html=True)
 	parser.add_argument("-s", "--spec-dir", dest="spec_dir", type=str,
 		help="Assignment spec YAML directory", default="spec_yaml_files")
-	parser.add_argument("-d", "--data-dir", dest="data_dir", type=str,
-		help="Input data directory", default="data/inputs")
-	parser.add_argument("-r", "--roster", dest="roster_csv", type=str,
-		help="Roster CSV path", default="current_students.csv")
-	parser.add_argument("-o", "--run-dir", dest="run_dir", type=str,
-		help="Output run directory", default="data/runs")
+	parser.add_argument("-t", "--term", dest="term", type=str, default=None,
+		help=(
+			"Active term override (e.g., spring_2026). "
+			"Defaults to Protein_Images/active_term.txt."
+		))
 	parser.add_argument("-y", dest="yaml_backup_file", type=str,
 		help="Load backup data file", default=None)
 	# Parse the arguments into a Namespace object
@@ -378,26 +378,26 @@ def parse_and_prepare() -> dict:
 	args = parse_args()
 	image_number = args.image_number
 	spec_dir = args.spec_dir
-	data_dir = args.data_dir
-	roster_csv = args.roster_csv
-	run_dir = args.run_dir
 	if not os.path.isdir(spec_dir):
 		raise ValueError(f"Spec directory not found: {spec_dir}")
-	if not os.path.isdir(data_dir):
-		raise ValueError(f"Data directory not found: {data_dir}")
-	if not os.path.isdir(run_dir):
-		os.makedirs(run_dir)
 
-	folder = os.path.join(run_dir, f"IMAGE_{image_number:02d}")
-	# Ensure the folder exists
+	# Resolve canonical term-scoped paths via the helper.
+	term = protein_images_path.get_active_term(args.term)
+	submissions_dir = protein_images_path.get_submissions_dir(term)
+	grades_dir = protein_images_path.get_grades_dir(term)
+	forms_dir = protein_images_path.get_forms_dir(term)
+	roster_csv = str(protein_images_path.get_roster_csv(term))
+
+	folder = str(submissions_dir / f"image_{image_number:02d}")
 	if not os.path.isdir(folder):
-		os.mkdir(folder)
+		os.makedirs(folder)
 
-	current_year = time.localtime().tm_year
-	image_folder = os.path.join(run_dir, f"DOWNLOAD_{image_number:02d}_year_{current_year:04d}")
-	# Ensure the folder exists
+	image_folder = str(submissions_dir / f"download_{image_number:02d}_raw")
 	if not os.path.isdir(image_folder):
-		os.mkdir(image_folder)
+		os.makedirs(image_folder)
+
+	if not os.path.isdir(grades_dir):
+		os.makedirs(grades_dir)
 
 	repo_root = archive_paths.get_repo_root()
 	archive_root = str(repo_root / "archive")
@@ -412,15 +412,15 @@ def parse_and_prepare() -> dict:
 	# Construct file paths
 	config_yaml = os.path.join(spec_dir, f"protein_image_{image_number:02d}.yml")
 	csv_pattern = f"BCHM_Prot_Img_{image_number:02d}-*.csv"
+	# Look in the per-image work folder first; if not present, look in the
+	# canonical forms/ folder for this term and copy in.
 	input_csv_glob = glob.glob(os.path.join(folder, csv_pattern))
 	if len(input_csv_glob) < 1:
-		search_roots = [os.getcwd(), run_dir, data_dir]
-		candidates = []
-		for search_root in search_roots:
-			candidates.extend(glob.glob(os.path.join(search_root, csv_pattern)))
-		candidates = list(dict.fromkeys(candidates))
+		candidates = sorted(glob.glob(os.path.join(str(forms_dir), csv_pattern)))
 		if len(candidates) < 1:
-			raise ValueError(f"Input CSV not found: {csv_pattern}")
+			raise ValueError(
+				f"Input CSV not found in {forms_dir} matching {csv_pattern}"
+			)
 		if len(candidates) > 1:
 			raise ValueError(f"Multiple input CSV files found: {candidates}")
 		source_csv = candidates[0]
@@ -429,18 +429,19 @@ def parse_and_prepare() -> dict:
 		input_csv = target_csv
 	else:
 		input_csv = input_csv_glob.pop()
-	output_csv = os.path.join(folder, f"output-protein_image_{image_number:02d}.csv")
-	output_yml = os.path.join(folder, f"output-protein_image_{image_number:02d}.yml")
-	grades_csv = os.path.join(folder, f"blackboard_upload-protein_image_{image_number:02d}.csv")
+	output_csv = str(grades_dir / f"output-protein_image_{image_number:02d}.csv")
+	output_yml = str(grades_dir / f"output-protein_image_{image_number:02d}.yml")
+	grades_csv = str(
+		grades_dir / f"blackboard_upload-protein_image_{image_number:02d}.csv"
+	)
 	student_ids_csv = roster_csv
 	image_hashes_yaml = str(archive_paths.get_image_hashes_path(repo_root))
 
 	params_dict = {
 		"args": args,
 		"image_number": image_number,
+		"term": term,
 		"spec_dir": spec_dir,
-		"data_dir": data_dir,
-		"run_dir": run_dir,
 		"folder": folder,
 		"image_folder": image_folder,
 		"archive_root": archive_root,
@@ -473,9 +474,8 @@ def display_info(params: dict):
 	table.add_column("Name", style="dim", width=20)
 	table.add_column("Value", justify="left")
 
+	table.add_row("Term", params["term"])
 	table.add_row("Spec Dir", params["spec_dir"])
-	table.add_row("Data Dir", params["data_dir"])
-	table.add_row("Run Dir", params["run_dir"])
 	table.add_row("Image Number", str(params["image_number"]))
 	table.add_row("Config YAML", params["config_yaml"])
 	table.add_row("Input CSV", params["input_csv"])
@@ -772,7 +772,7 @@ def main():
 	# Prepare file paths and other paramters
 	params = parse_and_prepare()
 
-	# Read the the YAML_files/protein_image_xx.yml file
+	# Read the spec_yaml_files/protein_image_xx.yml file
 	read_only_config = load_yaml_config(params)
 
 	# read student data and match submitted names to the roster

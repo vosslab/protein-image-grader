@@ -1,3 +1,11 @@
+# External Synology-synced data (user-supplied symlink). Never tracked.
+/Protein_Images
+/ARCHIVE_IMAGES
+/protein_image.tar
+# Legacy Google Forms exports at repo root (planned to move under Protein_Images/semesters/<term>/forms/)
+/BCHM_Prot_Img_*.csv
+/current_students.csv
+
 # Byte-compiled / optimized / DLL files
 service_key.json
 __pycache__/

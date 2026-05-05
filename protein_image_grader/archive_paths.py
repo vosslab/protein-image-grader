@@ -8,7 +8,7 @@ import subprocess
 import protein_image_grader.rmspaces
 
 ARCHIVE_ROOT_NAME = "archive"
-ARCHIVE_IMAGES_NAME = "ARCHIVE_IMAGES"
+IMAGE_BANK_NAME = "image_bank"
 LEGACY_IMPORT_TERM = "legacy_import"
 IMAGE_HASHES_NAME = "image_hashes.yml"
 
@@ -122,13 +122,13 @@ def get_image_hashes_path(repo_root: pathlib.Path | None = None) -> pathlib.Path
 
 
 #============================================
-def make_archive_images_dir(term_label: str, repo_root: pathlib.Path | None = None) -> pathlib.Path:
+def make_image_bank_dir(term_label: str, repo_root: pathlib.Path | None = None) -> pathlib.Path:
 	"""
-	Build the archive images directory for a term.
+	Build the image_bank directory for a term in the local repo archive.
 	"""
 	if repo_root is None:
 		repo_root = get_repo_root()
-	path = repo_root / ARCHIVE_ROOT_NAME / term_label / ARCHIVE_IMAGES_NAME
+	path = repo_root / ARCHIVE_ROOT_NAME / term_label / IMAGE_BANK_NAME
 	return path
 
 
@@ -143,7 +143,7 @@ def make_archive_assignment_dir(
 	Build the archive assignment directory.
 	"""
 	assignment_folder = make_assignment_archive_folder(image_number, assignment_name)
-	path = make_archive_images_dir(term_label, repo_root) / assignment_folder
+	path = make_image_bank_dir(term_label, repo_root) / assignment_folder
 	return path
 
 
@@ -164,19 +164,27 @@ def _strip_repo_prefix(path_text: str, repo_root: pathlib.Path) -> str:
 
 
 #============================================
-def _normalize_legacy_archive_images(path_text: str) -> str:
+# Legacy literal recognized in old hash records (pre-migration). Production
+# code never writes this; kept only to recognize and rewrite legacy strings
+# from migration-era reports or stale tools output.
+_LEGACY_ARCHIVE_IMAGES_LITERAL = "ARCHIVE_IMAGES"
+
+
+def _rewrite_legacy_archive_images(path_text: str) -> str:
 	"""
-	Normalize legacy ARCHIVE_IMAGES paths to the legacy import bucket.
+	Rewrite legacy ARCHIVE_IMAGES/ prefix (and per-term variant) to canonical
+	image_bank/.
 	"""
-	prefix = f"{ARCHIVE_IMAGES_NAME}/"
-	if path_text == ARCHIVE_IMAGES_NAME:
+	prefix = f"{_LEGACY_ARCHIVE_IMAGES_LITERAL}/"
+	if path_text == _LEGACY_ARCHIVE_IMAGES_LITERAL:
 		raise ValueError("Archive path points to ARCHIVE_IMAGES without a file path.")
 	if path_text.startswith(prefix):
 		remainder = path_text[len(prefix):]
-		path_text = (
-			f"{ARCHIVE_ROOT_NAME}/{LEGACY_IMPORT_TERM}/"
-			f"{ARCHIVE_IMAGES_NAME}/{remainder}"
-		)
+		path_text = f"{IMAGE_BANK_NAME}/{remainder}"
+	# Rewrite per-term legacy: archive/<term>/ARCHIVE_IMAGES/... -> archive/<term>/image_bank/...
+	per_term_legacy = f"/{_LEGACY_ARCHIVE_IMAGES_LITERAL}/"
+	if per_term_legacy in path_text:
+		path_text = path_text.replace(per_term_legacy, f"/{IMAGE_BANK_NAME}/")
 	return path_text
 
 
@@ -186,14 +194,12 @@ def normalize_hash_path(
 	repo_root: pathlib.Path | None = None,
 ) -> str:
 	"""
-	Normalize a hash YAML file path.
+	Normalize a hash YAML file path to a canonical repo- or data-root-relative
+	POSIX string.
 
-	Args:
-		path_text: File path from a hash record or archive operation.
-		repo_root: Optional repository root for absolute path conversion.
-
-	Returns:
-		str: Canonical repo-relative POSIX path.
+	Canonical formats:
+	- image_bank/<rel>                 (Synology image bank, resolved via helper)
+	- archive/<term>/image_bank/<rel>  (per-term repo bucket)
 	"""
 	if repo_root is None:
 		repo_root = get_repo_root()
@@ -202,9 +208,9 @@ def normalize_hash_path(
 		raise ValueError("Archive path is empty.")
 	clean_text = _strip_repo_prefix(clean_text, repo_root)
 	clean_text = clean_text.lstrip("./")
-	clean_text = _normalize_legacy_archive_images(clean_text)
-	canonical_prefix = f"{ARCHIVE_ROOT_NAME}/"
-	if not clean_text.startswith(canonical_prefix):
+	clean_text = _rewrite_legacy_archive_images(clean_text)
+	canonical_prefixes = (f"{ARCHIVE_ROOT_NAME}/", f"{IMAGE_BANK_NAME}/")
+	if not clean_text.startswith(canonical_prefixes):
 		raise ValueError(f"Archive path cannot be normalized: {path_text}")
 	return clean_text
 
@@ -214,9 +220,13 @@ def resolve_archive_path(path_text: str, repo_root: pathlib.Path) -> pathlib.Pat
 	"""
 	Resolve an archive path to a candidate local file path.
 
-	Resolution may return a candidate path that does not exist. Caller code decides
-	whether to warn or fail.
+	- Bare image_bank/<rel> resolves through the Synology helper to
+	  Protein_Images/image_bank/<rel>.
+	- archive/<term>/... resolves to <repo_root>/<path>.
+	- Resolution may return a path that does not exist; callers decide.
 	"""
+	# Local import to avoid a circular import at module load time.
+	import protein_image_grader.protein_images_path as protein_images_path
 	clean_text = path_to_posix(path_text).strip()
 	if not clean_text:
 		raise ValueError("Archive path is empty.")
@@ -224,16 +234,10 @@ def resolve_archive_path(path_text: str, repo_root: pathlib.Path) -> pathlib.Pat
 	if path.is_absolute():
 		return path
 	clean_text = clean_text.lstrip("./")
-	legacy_prefix = f"{ARCHIVE_IMAGES_NAME}/"
-	if clean_text.startswith(legacy_prefix):
-		root_legacy_path = repo_root / clean_text
-		if root_legacy_path.exists():
-			return root_legacy_path
-		remainder = clean_text[len(legacy_prefix):]
-		fallback_path = (
-			repo_root / ARCHIVE_ROOT_NAME / LEGACY_IMPORT_TERM
-			/ ARCHIVE_IMAGES_NAME / remainder
-		)
-		return fallback_path
+	clean_text = _rewrite_legacy_archive_images(clean_text)
+	external_prefix = f"{IMAGE_BANK_NAME}/"
+	if clean_text.startswith(external_prefix):
+		remainder = clean_text[len(external_prefix):]
+		return protein_images_path.get_image_bank_dir() / remainder
 	resolved_path = repo_root / clean_text
 	return resolved_path

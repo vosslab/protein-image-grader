@@ -43,7 +43,7 @@ def test_dry_run_writes_manifest_without_copying(tmp_path: pathlib.Path) -> None
 		False,
 	)
 
-	target_file = target_root / "legacy_import" / "ARCHIVE_IMAGES" / "BCHM_Prot_Img_04" / "x.png"
+	target_file = target_root / "legacy_import" / "image_bank" / "BCHM_Prot_Img_04" / "x.png"
 	assert records[0]["status"] == "would_copy"
 	assert not target_file.exists()
 	assert read_manifest(manifest)[0]["status"] == "would_copy"
@@ -68,7 +68,7 @@ def test_copy_mode_preserves_assignment_folder(tmp_path: pathlib.Path) -> None:
 		True,
 	)
 
-	target_file = target_root / "legacy_import" / "ARCHIVE_IMAGES" / "BCHM_Prot_Img_04" / "x.png"
+	target_file = target_root / "legacy_import" / "image_bank" / "BCHM_Prot_Img_04" / "x.png"
 	assert records[0]["status"] == "copied"
 	assert target_file.read_bytes() == b"image"
 
@@ -83,7 +83,7 @@ def test_existing_same_file_is_skipped(tmp_path: pathlib.Path) -> None:
 	source_file.parent.mkdir(parents=True)
 	source_file.write_bytes(b"image")
 	target_root = tmp_path / "archive"
-	target_file = target_root / "legacy_import" / "ARCHIVE_IMAGES" / "BCHM_Prot_Img_04" / "x.png"
+	target_file = target_root / "legacy_import" / "image_bank" / "BCHM_Prot_Img_04" / "x.png"
 	target_file.parent.mkdir(parents=True)
 	target_file.write_bytes(b"image")
 
@@ -102,7 +102,7 @@ def test_existing_different_file_is_conflict(tmp_path: pathlib.Path) -> None:
 	source_file.parent.mkdir(parents=True)
 	source_file.write_bytes(b"image")
 	target_root = tmp_path / "archive"
-	target_file = target_root / "legacy_import" / "ARCHIVE_IMAGES" / "BCHM_Prot_Img_04" / "x.png"
+	target_file = target_root / "legacy_import" / "image_bank" / "BCHM_Prot_Img_04" / "x.png"
 	target_file.parent.mkdir(parents=True)
 	target_file.write_bytes(b"different")
 
@@ -130,6 +130,6 @@ def test_non_image_file_is_reported_and_not_copied(tmp_path: pathlib.Path) -> No
 		True,
 	)
 
-	target_file = target_root / "legacy_import" / "ARCHIVE_IMAGES" / "BCHM_Prot_Img_04" / "notes.txt"
+	target_file = target_root / "legacy_import" / "image_bank" / "BCHM_Prot_Img_04" / "notes.txt"
 	assert records[0]["status"] == "non_image"
 	assert not target_file.exists()

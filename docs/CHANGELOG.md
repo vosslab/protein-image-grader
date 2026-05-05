@@ -35,10 +35,34 @@
 - Style: drop non-builtin type annotations from `student_id_protein.get_input_validation` (the `style: Style = ...` arg) and from the four PIL helpers in `google_drive_image_utils.py` (`get_background_color`, `rotate_if_tall`, `trim`, `multi_trim`); per PYTHON_STYLE.md, type hints stay on builtin types only.
 - Style: regroup imports in `duplicate_processing.py`, `grade_protein_image.py`, `interactive_image_criteria_class.py`, `read_save_images.py`, and `student_id_protein.py` under `# Standard Library`, `# PIP3 modules`, and `# local repo modules` headings.
 
+### Additions and New Features
+- Patch 1 (complete) of the Protein_Images integration milestone: add `protein_image_grader/protein_images_path.py`, the canonical helper module that resolves the external data root, the active term, and per-term subpaths (`get_protein_images_dir`, `get_archive_images_dir`, `get_active_term`, `get_term_dir`, `get_forms_dir`, `get_yaml_dir`, `get_grades_dir`, `get_submissions_dir`, `get_roster_csv`, `get_credentials_dir`, `SETUP_MESSAGE`). Path resolution is lazy (no import-time IO). Tests in `tests/test_protein_images_path.py` pin the contract using `tmp_path` and a monkeypatched repo root.
+- Patch 2 (complete) of the Protein_Images integration milestone: add the `local_migrations/protein_images/` package containing `migrate_protein_images.py` plus the classifier, planner, reporting, backup_check, and executor modules. Dry-run is the default; `--apply` requires a previously saved report and a sibling backup directory. 35 tests run against synthetic fixture trees under `tmp_path`; no real `Protein_Images/` data is touched.
+
+### Behavior or Interface Changes
+- Protein_Images integration milestone: no production behavior changes applied yet. Patch 5 will add `--term` and remove `--roster` from `grade_protein_image.py`; Patch 4 will switch `archive_paths.py`, `tools/copy_archive_images.py`, `tools/log_image_hashes.py`, and the `duplicate_processing.py` string check to lowercase `archive_images/`. These are planned, not done.
+
+### Fixes and Maintenance
+- Update `.gitignore` to anchor (with leading `/`) the external data root and stray repo-root data files: `/Protein_Images`, `/ARCHIVE_IMAGES`, `/protein_image.tar`, `/BCHM_Prot_Img_*.csv`, `/current_students.csv`. Existing nested rules (`data/inputs/current_students.csv`, etc.) are left untouched.
+- Update `README.md` with an "External data" section: `ln -s` instructions, the planned canonical layout, the role of `active_term.txt` and the planned `--term` override, a pointer to `local_migrations/protein_images/migrate_protein_images.py --help`, and the credentials location at `~/.config/bchm_355/credentials/`.
+
+### Removals and Deprecations
+- Planned for the Protein_Images integration milestone (Patch 6, not yet done): remove the redundant top-level `ARCHIVE_IMAGES` symlink and the repo-root `BCHM_Prot_Img_*.csv` and `current_students.csv` copies after the grader is verified against canonical paths.
+- Planned for the Protein_Images integration milestone (Patch 5, not yet done): remove the `--roster` flag from `grade_protein_image.py` after the term-aware roster resolver is verified by one real grading run.
+
 ### Decisions and Failures
 - Decision: leave `os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")` in `google_drive_image_utils.find_service_key_file`. PYTHON_STYLE.md only forbids invented env vars, and this is the standard Google ecosystem variable used by every official Google Cloud SDK.
 - Decision: keep the `SKIP_REPO_HYGIENE` env-var escape hatch in `tests/conftest.py`, `tests/git_file_utils.py`, `tests/test_ascii_compliance.py`, and `tests/test_import_requirements.py`. The style rule targets program code; threading a pytest CLI flag through shared test helpers and external CI invocations is more disruptive than the rule warrants.
 - Decision: do not rewrite `student_entry.get(...)` / `params.get(...)` / `image_hashes['md5'].get(...)` calls in `read_save_images.py`, `duplicate_processing.py`, `roster_matching.py`, `file_io_protein.py`, and `send_feedback_email.py`. The audit flagged these as "default hides bug" but each one is a legitimate `is None` / falsy check on a genuinely optional field, not a fallback that masks a missing required key.
+- Decision (Protein_Images integration milestone): canonical layout under `Protein_Images/` is lowercase snake_case throughout (`archive_images/`, `semesters/<season>_<year>/{roster.csv,forms,yaml,grades,submissions}`, `legacy/needs_review/`).
+- Decision (Protein_Images integration milestone): the active term is explicit (`Protein_Images/active_term.txt` plus optional `--term` override). No date-based auto-detection, because regrades happen out of season.
+- Decision (Protein_Images integration milestone): credentials (`api_file.json`, `service_key.json`) are not course data and will live at `~/.config/bchm_355/credentials/`, not inside `Protein_Images/`.
+- Decision (Protein_Images integration milestone): migration is dry-run-first, requires a sibling `Protein_Images_backup_<date>/` to exist before `--apply`, and only moves or renames within `Protein_Images/`. It never deletes data; low-confidence items go to `legacy/needs_review/`.
+- Decision (Protein_Images integration milestone): handle macOS case-only renames (e.g. `ARCHIVE_IMAGES` -> `archive_images`) explicitly via a two-step move, since HFS+/APFS default mounts are case-insensitive.
+- Decision (Protein_Images integration milestone): `local_migrations/` is tracked in git temporarily during this milestone and will be removed in a cleanup patch after the migration is applied (WS-C).
+
+### Developer Tests and Notes
+- Protein_Images integration milestone: Patches 3 (apply migration to real data), 4 (refactor `archive-paths` and tools-cli), 5 (refactor grader-cli, add `--term`, remove `--roster`), 6 (gitignore + repo-root cleanup), and 7 (final docs sweep) are upcoming, not yet done.
 
 ## 2025-12-29
 - Rename `protein_image_grader/test_google_image.py` to `protein_image_grader/google_drive_image_utils.py`.
