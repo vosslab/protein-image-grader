@@ -63,6 +63,8 @@
 
 ### Developer Tests and Notes
 - Protein_Images integration milestone: Patches 3 (apply migration to real data), 4 (refactor `archive-paths` and tools-cli), 5 (refactor grader-cli, add `--term`, remove `--roster`), 6 (gitignore + repo-root cleanup), and 7 (final docs sweep) are upcoming, not yet done.
+- Protein_Images integration milestone manual correction (2026-05-05, post-WS-C): the migration classifier sent `IMAGE_02/` to `semesters/spring_2024/submissions/image_02/` based on the legacy folder's birthtime (2024-02-17). The folder had been reused across terms; its 11 contents all have mtime 2025-02-25 and belong to spring 2025. Manually moved the folder to `Protein_Images/semesters/spring_2025/submissions/image_02/` after validation. The empty `Protein_Images/semesters/spring_2024/submissions/` directory was left in place. Recommendation: future migration runs should weight content mtime over folder birthtime when inferring per-image term.
+- Rename canonical `archive_images` -> `image_bank` (Synology `Protein_Images/image_bank/` and per-term repo `archive/<term>/image_bank/`) to avoid Synology Drive case-conflict markers from the prior `ARCHIVE_IMAGES` -> `archive_images` rename. All 2615 hash records in `archive/image_hashes.yml` rewritten; helper renamed to `get_image_bank_dir()`; constant renamed to `IMAGE_BANK_NAME` / `IMAGE_BANK_SUBDIR`. Repo-internal `archive/` folder name kept as-is (unambiguous in context).
 
 ## 2025-12-29
 - Rename `protein_image_grader/test_google_image.py` to `protein_image_grader/google_drive_image_utils.py`.
