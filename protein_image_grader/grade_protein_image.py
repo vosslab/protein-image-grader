@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 #length, then alphabetical ordering of import statements
 import os
 import sys
@@ -23,6 +21,7 @@ import protein_image_grader.read_save_images as read_save_images
 import protein_image_grader.student_id_protein as student_id_protein
 import protein_image_grader.timestamp_tools as timestamp_tools
 import protein_image_grader.download_submission_images as download_submission_images
+import protein_image_grader.archive_paths as archive_paths
 
 console = Console()
 warning_color = Style(color="rgb(255, 187, 51)" )  # RGB for bright orange
@@ -409,7 +408,8 @@ def parse_and_prepare() -> dict:
 	if not os.path.isdir(image_folder):
 		os.mkdir(image_folder)
 
-	archive_root = "archive"
+	repo_root = archive_paths.get_repo_root()
+	archive_root = str(repo_root / "archive")
 	archive_assignment_dir = download_submission_images.get_archive_assignment_dir(
 		image_number, spec_dir
 	)
@@ -442,7 +442,7 @@ def parse_and_prepare() -> dict:
 	output_yml = os.path.join(folder, f"output-protein_image_{image_number:02d}.yml")
 	grades_csv = os.path.join(folder, f"blackboard_upload-protein_image_{image_number:02d}.csv")
 	student_ids_csv = roster_csv
-	image_hashes_yaml = os.path.join(archive_root, "image_hashes.yml")
+	image_hashes_yaml = str(archive_paths.get_image_hashes_path(repo_root))
 
 	params_dict = {
 		"args": args,

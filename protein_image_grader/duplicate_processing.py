@@ -6,6 +6,7 @@ from rich.style import Style
 from collections import defaultdict
 
 import protein_image_grader.student_id_protein as student_id_protein
+import protein_image_grader.archive_paths as archive_paths
 
 console = Console()
 warning_color = Style(color="rgb(255, 187, 51)")  # RGB for bright orange
@@ -182,6 +183,7 @@ def get_non_overlapping_group_sets(list_of_sets):
 #============================================
 def find_similar_duplicates(student_tree: list, image_hashes: dict, local_image_hashes: dict):
 	comparisons = 0
+	repo_root = archive_paths.get_repo_root()
 
 	list_of_sets = []
 
@@ -235,7 +237,17 @@ def find_similar_duplicates(student_tree: list, image_hashes: dict, local_image_
 
 	for group_num, group_set in enumerate(non_overlapping_group_sets, start=1):
 		print(f"GROUP NUMBER {group_num}")
-		open_files = [path for path in sorted(group_set) if os.path.isfile(path)]
+		open_files = []
+		for path in sorted(group_set):
+			resolved_path = archive_paths.resolve_archive_path(path, repo_root)
+			if os.path.isfile(resolved_path):
+				open_files.append(str(resolved_path))
+				continue
+			if path.startswith("ARCHIVE_IMAGES/") or path.startswith("archive/"):
+				console.print(
+					f"WARNING: archive image file not found: {path}",
+					style=warning_color
+				)
 		if open_files:
 			system_cmd = "open " + ' '.join(open_files)
 			print(system_cmd)

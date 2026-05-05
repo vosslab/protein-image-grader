@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-05-05
+- Add `protein_image_grader/archive_paths.py` for canonical archive hash paths and legacy path resolution (imported by runtime code).
+- Add `tools/copy_archive_images.py` for copy-only legacy archive migration with a CSV manifest.
+- Update grading, download, duplicate checking, and hash rebuild paths to use archive utilities.
+- Load Google Drive credentials lazily so non-download tests do not require `service_key.json`.
+- Add pytest configuration to avoid collecting symlinked archive content.
+- Document canonical archive paths, Synology-compatible legacy resolution, and copy migration commands.
+- Keep `tools/` for executable maintenance scripts only; runtime infrastructure lives in `protein_image_grader/`.
+- `tools/` has no `__init__.py` and is not importable; tests load `tools/copy_archive_images.py` by file path.
+
 ## 2025-12-29
 - Rename `protein_image_grader/test_google_image.py` to `protein_image_grader/google_drive_image_utils.py`.
 - Add service key discovery helper in `protein_image_grader/google_drive_image_utils.py`.

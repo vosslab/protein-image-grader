@@ -1,10 +1,17 @@
 import os
+import sys
 
 import pytest
 
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SKIP_ENV = "SKIP_REPO_HYGIENE"
+
+
+# Put repo root on sys.path so tests can `import protein_image_grader.<module>`
+# without needing a source_me.sh or PYTHONPATH= shell setup.
+if REPO_ROOT not in sys.path:
+	sys.path.insert(0, REPO_ROOT)
 
 
 #============================================

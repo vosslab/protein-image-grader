@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import os
 import sys
 import glob
@@ -11,6 +9,7 @@ from rich.style import Style
 from PIL import Image
 import protein_image_grader.google_drive_image_utils as google_drive_image_utils
 import protein_image_grader.student_id_protein as student_id_protein
+import protein_image_grader.archive_paths as archive_paths
 
 console = Console()
 warning_color = Style(color="rgb(255, 187, 51)")  # RGB for bright orange
@@ -203,6 +202,7 @@ def update_image_hashes(image_hashes: dict, md5hash: str, phash: str,
 	"""
 	Update image hash dictionaries with a new entry.
 	"""
+	archive_path = archive_paths.normalize_hash_path(archive_path)
 	changed = False
 	if md5hash and image_hashes['md5'].get(md5hash) is None:
 		image_hashes['md5'][md5hash] = archive_path

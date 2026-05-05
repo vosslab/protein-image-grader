@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # Standard Library
 import os
 import re
@@ -19,6 +17,7 @@ import yaml
 # local repo modules
 import protein_image_grader.commonlib as commonlib
 import protein_image_grader.google_drive_image_utils as google_drive_image_utils
+import protein_image_grader.archive_paths as archive_paths
 
 register_heif_opener()
 
@@ -303,11 +302,9 @@ def get_term_from_month(month: int) -> str:
 	"""
 	Map month to term label.
 	"""
-	if 1 <= month <= 5:
-		return "1Spring"
-	if 6 <= month <= 8:
-		return "2Summer"
-	return "3Fall"
+	current_year = time.localtime().tm_year
+	term_label = archive_paths.make_term_label_from_month(current_year, month)
+	return term_label
 
 #============================================
 def get_archive_assignment_dir(image_number: int, spec_dir: str) -> str:
@@ -315,9 +312,9 @@ def get_archive_assignment_dir(image_number: int, spec_dir: str) -> str:
 	Build the archive assignment directory path.
 	"""
 	current_year = time.localtime().tm_year
-	current_term = get_term_from_month(time.localtime().tm_mon)
-	archive_session_dir = os.path.join("archive", f"{current_year}_{current_term}")
-	archive_images_dir = os.path.join(archive_session_dir, "ARCHIVE_IMAGES")
+	current_term = archive_paths.make_term_label_from_month(
+		current_year, time.localtime().tm_mon
+	)
 
 	assignment_name = None
 	spec_yaml = os.path.join(spec_dir, f"protein_image_{image_number:02d}.yml")
@@ -326,14 +323,12 @@ def get_archive_assignment_dir(image_number: int, spec_dir: str) -> str:
 			config = yaml.safe_load(f)
 			assignment_name = config.get('assignment name', None)
 
-	assignment_dir = f"BCHM_Prot_Img_{image_number:02d}"
-	if assignment_name:
-		clib = commonlib.CommonLib()
-		clean_name = clib.cleanName(assignment_name)
-		if clean_name:
-			assignment_dir = f"{assignment_dir}_{clean_name}"
+	repo_root = archive_paths.get_repo_root()
+	archive_dir = archive_paths.make_archive_assignment_dir(
+		image_number, assignment_name, current_term, repo_root
+	)
 
-	return os.path.join(archive_images_dir, assignment_dir)
+	return str(archive_dir)
 
 #============================================
 def load_image_hashes(image_hashes_yaml: str) -> dict:
@@ -360,6 +355,7 @@ def update_image_hashes(image_hashes: dict, md5hash: str, phash: str,
 	"""
 	Update image hash dictionaries with a new entry.
 	"""
+	archive_path = archive_paths.normalize_hash_path(archive_path)
 	changed = False
 	if md5hash and image_hashes['md5'].get(md5hash) is None:
 		image_hashes['md5'][md5hash] = archive_path
@@ -467,7 +463,7 @@ def main():
 
 	archive_dir = get_archive_assignment_dir(args.image_number, "spec_yaml_files")
 
-	image_hashes_yaml = os.path.join("archive", "image_hashes.yml")
+	image_hashes_yaml = str(archive_paths.get_image_hashes_path())
 	image_hashes = load_image_hashes(image_hashes_yaml)
 	hashes_changed = [False]
 

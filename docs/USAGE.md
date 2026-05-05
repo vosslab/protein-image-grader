@@ -30,8 +30,21 @@
 ## Archive behavior
 - Archive images are copied into `archive/<year_term>/ARCHIVE_IMAGES/`.
 - `archive/image_hashes.yml` is updated automatically as new images are processed.
+- Hash records are written as canonical repo-relative paths.
+- Legacy `ARCHIVE_IMAGES/...` records remain readable through a repo-root symlink or
+	`archive/legacy_import/ARCHIVE_IMAGES/...`.
 - Duplicate checks ignore matches when the 9-digit RUID prefix matches (same student).
 - Archive files without a 9-digit prefix are still included in duplicate checks.
+
+## Archive maintenance
+- Dry-run legacy archive copy migration:
+	- `python3 tools/copy_archive_images.py --source-archive ARCHIVE_IMAGES`
+- Copy legacy archive images after reviewing the manifest:
+	- `python3 tools/copy_archive_images.py --source-archive ARCHIVE_IMAGES --copy`
+- Dry-run hash rebuild:
+	- `python3 protein_image_grader/log_image_hashes.py --archive-root archive`
+- Rebuild hash database:
+	- `python3 protein_image_grader/log_image_hashes.py --archive-root archive --rebuild`
 
 ## Common image questions
 - If `spec_yaml_files/common_image_questions.yml` exists, it is merged into each assignment.

@@ -176,8 +176,4 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 .DS_Store
-report_shebang.txt
-report_pyflakes.txt
-report_bandit.txt
-report_pyright.txt
-report_ascii_compliance.txt
+report_*.txt

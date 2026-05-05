@@ -1,12 +1,15 @@
-#!/usr/bin/env python3
-
-# external python/pip modules
+# Standard Library
 import os
+import argparse
+
+# PIP3 modules
 import yaml
 import imagehash
 from PIL import Image
 
+# local repo modules
 import protein_image_grader.google_drive_image_utils as google_drive_image_utils
+import protein_image_grader.archive_paths as archive_paths
 
 def calculate_md5(image_path: str) -> str:
 	"""
@@ -53,38 +56,95 @@ def summarize_extensions(image_files: list) -> None:
 		ext_set.add(ext)
 	print("extensions found: ", ext_set)
 
-if __name__ == '__main__':
-	# Initialize dictionaries to hold hash values and file names
-	md5_dict = {}
-	phash_dict = {}
 
-	archive_root = 'archive'
-	archive_hashes = os.path.join(archive_root, 'image_hashes.yml')
-	if not os.path.isdir(archive_root):
-		raise ValueError(f"Archive directory not found: {archive_root}")
+#============================================
+def parse_args():
+	"""
+	Parse command line arguments.
+	"""
+	parser = argparse.ArgumentParser(description="Rebuild archive image hashes.")
+	parser.add_argument(
+		"--archive-root",
+		dest="archive_root",
+		default="archive",
+		help="Archive root directory.",
+	)
+	parser.add_argument(
+		"--rebuild",
+		dest="rebuild",
+		action="store_true",
+		help="Write image_hashes.yml. Without this flag, run as a dry-run.",
+	)
+	args = parser.parse_args()
+	return args
 
-	# Iterate over each file in the archive images folders
+
+#============================================
+def collect_archive_images(archive_root: str) -> list:
+	"""
+	Collect image files below ARCHIVE_IMAGES folders.
+	"""
 	image_files = []
 	for root, dirs, files in os.walk(archive_root):
+		dirs.sort()
 		if 'ARCHIVE_IMAGES' not in root.split(os.sep):
 			continue
-		for file in files:
+		for file in sorted(files):
 			full_path = os.path.join(root, file)
 			if os.path.isfile(full_path):
 				image_files.append(full_path)
 	image_files.sort()
+	return image_files
+
+
+#============================================
+def rebuild_hashes(archive_root: str) -> dict:
+	"""
+	Rebuild archive hashes from image files.
+	"""
+	# Initialize dictionaries to hold hash values and file names
+	md5_dict = {}
+	phash_dict = {}
+
+	if not os.path.isdir(archive_root):
+		raise ValueError(f"Archive directory not found: {archive_root}")
+
+	# Iterate over each file in the archive images folders
+	image_files = collect_archive_images(archive_root)
 	summarize_extensions(image_files)
 	for filepath in image_files:
-		filename = os.path.basename(filepath)
 		print(filepath)
 		# Calculate MD5 and pHash
 		image_data = open(filepath, 'rb')
 		md5_hash, perceptual_hash = google_drive_image_utils.get_hash_data(image_data)
+		hash_path = archive_paths.normalize_hash_path(filepath)
 
 		# Update the dictionaries
-		md5_dict[md5_hash] = filepath
-		phash_dict[perceptual_hash] = filepath
+		md5_dict[md5_hash] = hash_path
+		phash_dict[perceptual_hash] = hash_path
+
+	image_hashes = {'md5': md5_dict, 'phash': phash_dict}
+	return image_hashes
+
+
+#============================================
+def main():
+	"""
+	Run the hash rebuild script.
+	"""
+	args = parse_args()
+	archive_hashes = os.path.join(args.archive_root, 'image_hashes.yml')
+	image_hashes = rebuild_hashes(args.archive_root)
 
 	# Save the dictionaries to a YAML file
-	with open(archive_hashes, 'w') as f:
-		yaml.dump({'md5': md5_dict, 'phash': phash_dict}, f)
+	if args.rebuild:
+		with open(archive_hashes, 'w') as f:
+			yaml.dump(image_hashes, f)
+	else:
+		print("Dry-run complete. Use --rebuild to write image_hashes.yml.")
+	return
+
+
+#============================================
+if __name__ == '__main__':
+	main()

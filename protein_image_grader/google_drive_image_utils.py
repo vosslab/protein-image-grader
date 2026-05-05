@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # Standard Library
 import io
 import os
@@ -100,17 +98,25 @@ def find_service_key_file(filename: str = "service_key.json") -> str:
 
 #============================================
 
-# Replace with the path to your API key file
-#api_key_file = "api_file.json"
-api_key_file = find_service_key_file()
+DRIVE_SERVICE = None
 
-scopes = ['https://www.googleapis.com/auth/drive.readonly']
-credentials = Credentials.from_service_account_file(api_key_file, scopes=scopes)
-service = googleapiclient.discovery.build('drive', 'v3', credentials=credentials)
 
-# Initialize Google Drive API client
-#credentials = Credentials.from_service_account_file(api_key_file, scopes=['https://www.googleapis.com/auth/drive.readonly'])
-#service = googleapiclient.discovery.build('drive', 'v3', credentials=credentials)
+#============================================
+def get_drive_service():
+	"""
+	Create or return the Google Drive API service.
+
+	The service key is loaded lazily so non-download tests can import this module
+	without private credentials.
+	"""
+	global DRIVE_SERVICE
+	if DRIVE_SERVICE is not None:
+		return DRIVE_SERVICE
+	api_key_file = find_service_key_file()
+	scopes = ['https://www.googleapis.com/auth/drive.readonly']
+	credentials = Credentials.from_service_account_file(api_key_file, scopes=scopes)
+	DRIVE_SERVICE = googleapiclient.discovery.build('drive', 'v3', credentials=credentials)
+	return DRIVE_SERVICE
 
 #============================================
 
@@ -425,6 +431,7 @@ def send_http_request(url: str, session_data=None):
 #============================================
 
 def download_image(file_id):
+	service = get_drive_service()
 	# Initialize the file request for downloading the image
 	#print(f"fileId={file_id}")
 	#print("request = service.files().get_media(fileId=file_id)")
