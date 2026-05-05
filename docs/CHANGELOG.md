@@ -9,6 +9,15 @@
 - Document canonical archive paths, Synology-compatible legacy resolution, and copy migration commands.
 - Keep `tools/` for executable maintenance scripts only; runtime infrastructure lives in `protein_image_grader/`.
 - `tools/` has no `__init__.py` and is not importable; tests load `tools/copy_archive_images.py` by file path.
+- Style: make every module under `protein_image_grader/` library-only by removing `if __name__ == '__main__'` blocks; the root wrapper scripts (`grade_protein_image.py`, `download_submission_images.py`, `send_feedback_email.py`) remain the only CLI entry points for those flows.
+- Style: drop the executable bit on every `protein_image_grader/*.py` file.
+- Style: `git mv protein_image_grader/log_image_hashes.py tools/log_image_hashes.py`, add a proper shebang, and update `docs/USAGE.md` and `docs/ARCHIVE_PROCESS.md` to invoke it as `python3 tools/log_image_hashes.py ...`.
+- Style: replace `sys.exit(1)` calls in library code with raised errors (`ValueError`, `RuntimeError`, `FileNotFoundError`, `NotImplementedError`) across `commonlib.py`, `download_submission_images.py`, `google_drive_image_utils.py`, `grade_protein_image.py`, `read_save_images.py`, `send_feedback_email.py`, `student_id_protein.py`, and `timestamp_tools.py`; the Tk save-and-exit handler in `interactive_image_criteria_class.py` is unchanged.
+- Style: narrow the broad `except Exception` in `grade_protein_image.py` so the crash backup is written and the original exception is re-raised instead of swallowed by `sys.exit(1)`.
+- Style: in dry-run mode, `send_feedback_email.py` now `break`s out of the loop after the test email instead of calling `sys.exit(1)` from the dry-run branch.
+- Style: convert remaining `%` and `.format()` strings in `commonlib.py` and `send_feedback_email.py` to f-strings.
+- Style: drop the `__all__` list from `roster_matching.py`; per the package convention, `__init__.py` stays minimal and callers import from submodules directly.
+- Style: replace `typing.Dict` / `typing.Tuple` / `typing.Union` references in `grade_protein_image.py` docstrings with builtin generic descriptions.
 
 ## 2025-12-29
 - Rename `protein_image_grader/test_google_image.py` to `protein_image_grader/google_drive_image_utils.py`.

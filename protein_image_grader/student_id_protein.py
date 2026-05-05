@@ -1,6 +1,5 @@
 
 import re
-import sys
 import time
 from collections import defaultdict
 
@@ -367,15 +366,16 @@ def match_lists_and_add_student_ids(student_ids_tree: list, student_tree: list) 
 			student_id=str(student_entry.get("Student ID", "")),
 		)
 		if matched_id is None:
-			print("Could not match a student to the roster:")
-			print(student_entry)
-			print("Please edit the CSV file and try again.")
-			sys.exit(1)
+			raise RuntimeError(
+				f"Could not match a student to the roster: {student_entry}. "
+				"Please edit the CSV file and try again."
+			)
 
 		if matched_id in assigned_student_ids_set:
-			print(f"WARNING: Duplicate roster match for Student ID {matched_id}.")
-			print("Please edit the CSV file and try again.")
-			sys.exit(1)
+			raise RuntimeError(
+				f"Duplicate roster match for Student ID {matched_id}. "
+				"Please edit the CSV file and try again."
+			)
 		assigned_student_ids_set.add(matched_id)
 
 		roster_row = roster.get(matched_id, {})

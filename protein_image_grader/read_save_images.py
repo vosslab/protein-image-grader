@@ -1,5 +1,4 @@
 import os
-import sys
 import glob
 import shutil
 import protein_image_grader.commonlib as commonlib
@@ -25,8 +24,7 @@ def get_image_data(student_entry: dict, params: dict):
 
 	image_url = student_entry.get('image url')
 	if image_url is None:
-		console.print("  \aError: Image URL not found", style="bright_red")
-		sys.exit(1)
+		raise ValueError("Image URL not found in student entry")
 	output_filename_prefix = (
 		f"{student_entry['Student ID']}-"
 		f"{student_entry['First Name'].lower().replace(' ', '_')}_"

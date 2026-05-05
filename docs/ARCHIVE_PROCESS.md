@@ -80,9 +80,9 @@ Hashes are computed in `google_drive_image_utils.py`:
 
 ## Maintenance
 - To dry-run hash rebuilding:
-	- `python3 protein_image_grader/log_image_hashes.py --archive-root archive`
+	- `python3 tools/log_image_hashes.py --archive-root archive`
 - To rebuild hashes from the archive:
-	- `python3 protein_image_grader/log_image_hashes.py --archive-root archive --rebuild`
+	- `python3 tools/log_image_hashes.py --archive-root archive --rebuild`
 - It scans `archive/*/ARCHIVE_IMAGES/` and writes canonical paths to
 	`archive/image_hashes.yml`.
 

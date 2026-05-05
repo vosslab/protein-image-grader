@@ -10,23 +10,6 @@ import unicodedata
 import unidecode
 
 
-__all__ = [
-	"RosterMatcher",
-	"append_match_columns",
-	"build_roster_indexes",
-	"detect_delimiter",
-	"find_column_ci",
-	"load_roster",
-	"match_rows_to_roster",
-	"match_submission",
-	"normalize_name_text",
-	"normalize_username",
-	"prompt_choice",
-	"read_roster",
-	"safe_int",
-]
-
-
 #============================================
 def ansi_wrap(text: str, code: str) -> str:
 	"""Wrap text with an ANSI color code."""

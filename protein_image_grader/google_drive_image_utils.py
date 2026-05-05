@@ -1,7 +1,6 @@
 # Standard Library
 import io
 import os
-import sys
 import time
 import random
 import hashlib
@@ -393,7 +392,7 @@ def get_pixel_data(pil_image):
 #============================================
 
 def send_http_request(url: str, session_data=None):
-	sys.exit(1)
+	raise NotImplementedError("send_http_request is disabled")
 	# If session data is not provided, create a new session
 	if session_data is None:
 		session_data = requests.Session()
@@ -414,16 +413,16 @@ def send_http_request(url: str, session_data=None):
 	response = requests.get(url, headers=headers)
 
 	if response.status_code == 403:
-		print("Permission denied: 403 status code")
-		print("Headers: ", response.headers)
-		print("Content: ", response.content.decode())
-		sys.exit(1)
+		raise RuntimeError(
+			f"Permission denied: 403 status code; headers={response.headers!r}; "
+			f"content={response.content.decode()!r}"
+		)
 
 	if response.status_code != 200:
-		print(f"Failed to download: {response.status_code}")
-		print("Headers: ", response.headers)
-		print("Content: ", response.content.decode())
-		sys.exit(1)
+		raise RuntimeError(
+			f"Failed to download: {response.status_code}; headers={response.headers!r}; "
+			f"content={response.content.decode()!r}"
+		)
 
 	return response, session_data
 

@@ -1,7 +1,6 @@
 # Standard Library
 import os
 import re
-import sys
 import csv
 import time
 import random
@@ -294,8 +293,7 @@ def extract_number_in_range(s: str) -> int:
 		num = int(match)
 		if 1 <= num <= 20:
 			return num
-	print(f"No number in range 1-20 found in string: {s}")
-	sys.exit(1)
+	raise ValueError(f"No number in range 1-20 found in string: {s}")
 
 #============================================
 def get_term_from_month(month: int) -> str:
@@ -474,6 +472,3 @@ def main():
 		with open(image_hashes_yaml, 'w') as f:
 			yaml.dump(image_hashes, f)
 
-#============================================
-if __name__ == '__main__':
-	main()

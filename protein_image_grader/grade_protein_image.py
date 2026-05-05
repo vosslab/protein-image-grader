@@ -1,13 +1,11 @@
 #length, then alphabetical ordering of import statements
 import os
-import sys
 import glob
 import shutil
 import time
 import yaml
 import fnmatch
 import argparse
-import traceback
 from types import MappingProxyType
 
 from rich.console import Console
@@ -60,8 +58,7 @@ def get_answers_list_for_question(question_dict: dict) -> list:
 	if single_answer is not None:
 		# Check if the single answer is mistakenly provided as a list
 		if isinstance(single_answer, list):
-			console.print("use 'answers' not 'answer' in the YAML file for multiple answers")
-			sys.exit(1)
+			raise ValueError("use 'answers' not 'answer' in the YAML file for multiple answers")
 		# Create a list with the single accepted answer
 		accepted_answers = [question_dict.get('answer', None)]
 	else:
@@ -69,8 +66,7 @@ def get_answers_list_for_question(question_dict: dict) -> list:
 		accepted_answers = question_dict.get('answers', [])
 		# Validate if the accepted answers are in a list format
 		if not isinstance(accepted_answers, list):
-			console.print("use 'answer' not 'answers' in the YAML file for single answers")
-			sys.exit(1)
+			raise ValueError("use 'answer' not 'answers' in the YAML file for single answers")
 
 	# Return the list of accepted answers
 	return accepted_answers
@@ -157,12 +153,12 @@ def auto_grade_student_response(student_response: str, question_dict: dict) -> t
 	----------
 	student_response : str
 		The answer provided by the student.
-	question_dict : typing.Dict[str, typing.Any]
+	question_dict : dict
 		Dictionary containing the question details.
 
 	Returns
 	-------
-	typing.Tuple[typing.Union[float, None], typing.Union[str, None], typing.Union[str, None]]
+	tuple of (float or None, str or None, str or None)
 		A tuple containing the points deducted, the correctness of the answer, and feedback for the student.
 
 	"""
@@ -674,15 +670,12 @@ def process_and_save(params: dict, student_tree: list, read_only_config: dict):
 	"""
 	try:
 		process_data(student_tree, params, read_only_config)
-	except Exception as e:
-		# Backup crash data
+	except (KeyboardInterrupt, Exception):
+		# Backup crash data so the in-progress grading session is not lost,
+		# then re-raise so the traceback reaches the user.
 		file_io_protein.write_output_file("crash_data.csv", student_tree)
 		file_io_protein.backup_tree_to_yaml("crash_data.yml", student_tree)
-
-		# Print error message
-		traceback.print_exc()
-		print(f"Error processing: {e}")
-		sys.exit(1)
+		raise
 
 	# Write processed data to output files
 	file_io_protein.write_output_file(params["output_csv"], student_tree)
@@ -793,7 +786,3 @@ def main():
 	#final step must be doing a lot (!)
 	process_and_save(params, student_tree, read_only_config)
 
-#============================================
-
-if __name__ == '__main__':
-	main()

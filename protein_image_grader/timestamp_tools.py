@@ -1,5 +1,4 @@
 
-import sys
 from datetime import datetime
 
 #==========================================
@@ -113,10 +112,11 @@ def check_due_date(entry_timestamp: str, config: dict) -> tuple:
 	# Calculate the difference in hours between due_date and entry_datetime
 	hours_diff = (entry_datetime - due_date).total_seconds() / 3600
 
-	# Exit if the assignment is more than 6 months late
+	# Bail out if the assignment is more than 6 months late
 	if hours_diff > 2 * 30 * 24:
-		print("This assignment is more than 6 months late, fix the due date in the YAML file")
-		sys.exit(1)
+		raise ValueError(
+			"This assignment is more than 6 months late, fix the due date in the YAML file"
+		)
 
 	# Get the numeric deduction based on how late the assignment is
 	deduction = get_deduction(hours_diff, config["deadline"].get("numeric_deductions", {}))

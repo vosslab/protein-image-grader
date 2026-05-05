@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # Standard Library
 import os
 import argparse

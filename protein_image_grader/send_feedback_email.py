@@ -1,5 +1,4 @@
 import os
-import sys
 import time
 import yaml
 import random
@@ -51,8 +50,7 @@ def compose_script(recipient_name: str, email_addresses: list, subject: str, con
 	# Loop through each email address and add a new recipient
 	for email_address in email_addresses:
 		if '@' not in email_address:
-			print(email_address)
-			sys.exit(1)
+			raise ValueError(f"invalid email address: {email_address}")
 		script_text += f'''
 			make new to recipient with properties {{name:"{recipient_name}", address:"{email_address}"}}
 		'''
@@ -108,7 +106,7 @@ def make_content(student_entry, config):
 		for email_address in email_addresses:
 			content += f'Sent address: {email_address}\n'
 	content += 'Final Score:\n'
-	content += '{0:.1f} out of {1:.1f} points ({2:.0f}%)\n\n'.format(score, total_points, percent)
+	content += f'{score:.1f} out of {total_points:.1f} points ({percent:.0f}%)\n\n'
 	content += '----\n'
 
 
@@ -240,13 +238,6 @@ def main():
 			email_addresses = ["nvoss@roosevelt.edu",]
 			email_script = compose_script(recipient_name, email_addresses, email_subject, email_content)
 			run_script(email_script)
-			sys.exit(1)
+			# In dry-run mode, send a single test email to the instructor and stop.
+			break
 
-# Entry point of the script
-if __name__ == '__main__':
-	main()
-
-
-
-
-###

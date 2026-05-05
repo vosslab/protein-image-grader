@@ -42,9 +42,9 @@
 - Copy legacy archive images after reviewing the manifest:
 	- `python3 tools/copy_archive_images.py --source-archive ARCHIVE_IMAGES --copy`
 - Dry-run hash rebuild:
-	- `python3 protein_image_grader/log_image_hashes.py --archive-root archive`
+	- `python3 tools/log_image_hashes.py --archive-root archive`
 - Rebuild hash database:
-	- `python3 protein_image_grader/log_image_hashes.py --archive-root archive --rebuild`
+	- `python3 tools/log_image_hashes.py --archive-root archive --rebuild`
 
 ## Common image questions
 - If `spec_yaml_files/common_image_questions.yml` exists, it is merged into each assignment.

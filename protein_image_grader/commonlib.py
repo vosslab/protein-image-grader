@@ -1,6 +1,5 @@
 import os
 import re
-import sys
 import glob
 import time
 import random
@@ -185,8 +184,7 @@ class CommonLib(object):
 
 		# Final validation before returning the name
 		if len(g) == 0:
-			print(f"\033[31mERROR: {f}\033[0m")
-			sys.exit(1)
+			raise ValueError(f"name reduced to empty string from input: {f}")
 
 		# Optionally shorten the string to 40 characters if 'cut' is True
 		if cut and len(g) > 40:
@@ -264,8 +262,7 @@ class CommonLib(object):
 		Returns a quick md5 hash for file filename
 		"""
 		if not os.path.isfile(filename):
-			print((self.colorString("MD5SUM, file not found: "+filename, "red")))
-			sys.exit(1)
+			raise FileNotFoundError(f"MD5SUM, file not found: {filename}")
 		print(("QUICK MD5 "+filename))
 		f = open(filename, 'rb')
 		import hashlib
@@ -303,7 +300,7 @@ class CommonLib(object):
 		files.sort()
 		if shuffle is True:
 			random.shuffle(files)
-		print(("Found %d files"%(len(files))))
+		print(f"Found {len(files)} files")
 		return files
 
 	#=======================
@@ -382,8 +379,6 @@ class CommonLib(object):
 				b = opencol + b + closecol
 			except KeyError:
 				pass
-		return "%s%s%s%s" % (b, f, text, clear)
+		return f"{b}{f}{text}{clear}"
 
 
-if __name__ == '__main__':
-	CL = CommonLib()
