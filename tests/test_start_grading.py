@@ -426,7 +426,10 @@ def _form_csv_with_records(student_ids: list, base_ts: str) -> str:
 
 def _output_csv_with_records(student_ids: list) -> str:
 	# Minimal output CSV: just a Student ID column (the only one
-	# count_graded_records reads).
+	# count_graded_records reads). Grader writes tab-delimited (see
+	# file_io_protein.write_grades_csv); a single column has no
+	# delimiter to insert, so the same body works either way, but we
+	# explicitly mirror the real grader's format.
 	header = "Student ID\n"
 	body = "".join(f"{sid}\n" for sid in student_ids)
 	return header + body
@@ -469,6 +472,51 @@ def test_status_row_partial_when_form_has_more_records(tmp_path, monkeypatch):
 	assert row["form_count"] == 5
 	assert row["graded_count"] == 3
 	assert row["next_step"] == "regrade"
+
+
+def test_count_graded_records_handles_commas_inside_cells(tmp_path):
+	# Regression: the grader's output CSV is comma-delimited (see
+	# file_io_protein.write_output_file) but the headers themselves
+	# contain commas (e.g. "File type is PNG, not JPEG or something
+	# else Status"). csv.DictWriter wraps such cells in double quotes
+	# per RFC 4180; csv.DictReader unquotes them. count_graded_records
+	# must use the comma path and rely on the quoted-cell handling.
+	import csv as _csv
+	output_csv = tmp_path / "output.csv"
+	headers = [
+		"128-bit MD5 Hash",
+		"File type is PNG, not JPEG or something else Status",
+		"Final Score",
+		"Student ID",
+		"Username",
+	]
+	rows = [
+		{
+			"128-bit MD5 Hash": f"hash{i}",
+			"File type is PNG, not JPEG or something else Status": "Correct",
+			"Final Score": "5.00",
+			"Student ID": f"90000000{i}",
+			"Username": f"user{i}",
+		}
+		for i in range(3)
+	]
+	with open(output_csv, "w", newline="", encoding="utf-8") as handle:
+		writer = _csv.DictWriter(handle, headers)
+		writer.writeheader()
+		writer.writerows(rows)
+	assert sg.count_graded_records(output_csv) == 3
+
+
+def test_count_graded_records_reads_legacy_tab_delimited(tmp_path):
+	# Backward-compat: older grader writes were tab-delimited. Operators
+	# still have those on disk under spring_2026/. count_graded_records
+	# must auto-detect the delimiter from the header line so the
+	# dashboard does not crash on files written before the comma flip.
+	output_csv = tmp_path / "output.csv"
+	header = "128-bit MD5 Hash\tFinal Score\tStudent ID\tUsername\n"
+	rows = "".join(f"hash{i}\t5.00\t90000000{i}\tuser{i}\n" for i in range(4))
+	output_csv.write_text(header + rows, encoding="utf-8")
+	assert sg.count_graded_records(output_csv) == 4
 
 
 def test_compute_next_step_partial_routes_to_regrade():

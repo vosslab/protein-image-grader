@@ -180,14 +180,32 @@ def count_form_records(canonical_csv: pathlib.Path) -> int:
 
 
 #============================================
+def _detect_delimiter(header_line: str) -> str:
+	"""
+	Pick the dominant delimiter (comma or tab) from a CSV header line.
+
+	The grader writes comma-delimited per file_io_protein, but on-disk
+	files written before the comma migration are tab-delimited. Detect
+	rather than guess so a stale TSV does not poison the dashboard.
+	"""
+	if header_line.count("\t") > header_line.count(","):
+		return "\t"
+	return ","
+
+
+#============================================
 def count_graded_records(output_csv: pathlib.Path) -> int:
 	"""
 	Return the number of data rows in `output_csv` whose Student-ID
-	cell is non-empty. The grader's output CSV has a literal
-	"Student ID" header column.
+	cell is non-empty. The grader writes comma-delimited (see
+	file_io_protein.write_output_file); legacy tab-delimited files
+	from before the migration are still read via _detect_delimiter.
 	"""
-	with open(output_csv, "r", encoding="utf-8", newline="") as handle:
-		reader = csv.DictReader(handle)
+	with open(output_csv, "r", encoding="utf-8-sig", newline="") as handle:
+		first_line = handle.readline()
+		delimiter = _detect_delimiter(first_line)
+		handle.seek(0)
+		reader = csv.DictReader(handle, delimiter=delimiter)
 		count = 0
 		for row in reader:
 			value = row["Student ID"]
@@ -510,11 +528,22 @@ def build_email_command(image_number: int, term: str) -> list:
 
 
 #============================================
-def confirm_overwrite(prompt: str) -> bool:
+def confirm_overwrite(prompt: str, default_yes: bool = False) -> bool:
 	"""
-	Ask for y/N. Default is N. Always interactive; no --yes bypass flag.
+	Ask y/N. Default is N unless `default_yes` is True (then Y).
+	Always interactive; no --yes bypass flag.
+
+	Args:
+		prompt: Body of the question, without the trailing "[y/N]".
+		default_yes: When True, an empty answer means yes and the
+			tag shows as "[Y/n]". Use this for low-risk regrades
+			where the existing output is known to be a stale subset
+			of the form CSV.
 	"""
-	answer = input(f"{prompt} [y/N] ").strip().lower()
+	suffix = "[Y/n]" if default_yes else "[y/N]"
+	answer = input(f"{prompt} {suffix} ").strip().lower()
+	if not answer:
+		return default_yes
 	return answer == "y" or answer == "yes"
 
 
@@ -580,10 +609,30 @@ def run_step(term: str, image_number: int, step: str) -> int:
 		image_dir = protein_images_path.get_term_image_dir(term, image_number)
 		graded_csv = image_dir / f"output-protein_image_{image_number:02d}.csv"
 		if graded_csv.is_file():
-			ok = confirm_overwrite(
-				f"Existing grade output:\n  {graded_csv}\n"
-				f"Regrade and overwrite?"
-			)
+			# When the dashboard auto-routed because the form CSV grew
+			# (PARTIAL graded), reframe the prompt: the existing
+			# already-graded rows will be re-computed (idempotent), the
+			# only new work is the missing row(s). Default Y in that case
+			# so the operator can press Enter to proceed.
+			canonical_csvs = find_canonical_form_csvs(term)
+			row = build_status_row(image_number, term, canonical_csvs)
+			form_count = row["form_count"]
+			graded_count = row["graded_count"]
+			if (form_count is not None and graded_count is not None
+					and graded_count < form_count):
+				new_rows = form_count - graded_count
+				prompt_text = (
+					f"Re-grade to pick up {new_rows} new row(s)?\n"
+					f"  ({graded_count} existing graded scores will be "
+					f"re-computed; any hand-edits to {graded_csv.name}\n"
+					f"  will not be preserved.)"
+				)
+				ok = confirm_overwrite(prompt_text, default_yes=True)
+			else:
+				ok = confirm_overwrite(
+					f"Existing grade output:\n  {graded_csv}\n"
+					f"Regrade and overwrite?"
+				)
 			if not ok:
 				print("Aborted.")
 				return 1

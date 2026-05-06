@@ -107,8 +107,9 @@ def read_student_csv_data(input_csv: str, config: dict) -> list:
 	# Initialize a variable to hold the CSV headers
 	header_list = None
 
-	# Open the CSV file and read its content
-	with open(input_csv, 'r') as f:
+	# Open the CSV file and read its content. utf-8-sig strips an Excel
+	# BOM if present so the first header cell is not " Timestamp".
+	with open(input_csv, 'r', encoding='utf-8-sig') as f:
 		reader = csv.reader(f)
 		# Resolve the standard identity columns once we have the header row.
 		standard_indices = None
@@ -173,8 +174,8 @@ def read_student_ids(student_ids_csv: str) -> list:
 	header_list = None
 	student_ids_tree = []
 
-	# Open the CSV file for reading
-	with open(student_ids_csv, 'r') as f:
+	# Open the CSV file for reading. utf-8-sig strips an Excel BOM.
+	with open(student_ids_csv, 'r', encoding='utf-8-sig') as f:
 		reader = csv.reader(f)
 		for row_list in reader:
 			# If header_list is None, it means we're reading the first row, which is the header
@@ -232,10 +233,11 @@ def write_student_grades_for_upload(assignment_name: str, grades_csv: str, stude
 	# Create a new list of dictionaries filtered to only contain keys that are in the headers list
 	filtered_student_tree = [{k: s[k] for k in headers} for s in student_tree]
 
-	# Open the file in write mode
-	with open(grades_csv, 'w', newline='') as output_file:
-		# Initialize a CSV DictWriter object with the specified headers and delimiter
-		writer = csv.DictWriter(output_file, headers, delimiter='\t')
+	# Open the file in write mode. Comma-delimited + UTF-8 so the file
+	# round-trips cleanly through Google Sheets, Excel, and Blackboard.
+	# csv.DictWriter handles embedded commas via RFC 4180 quoting.
+	with open(grades_csv, 'w', newline='', encoding='utf-8') as output_file:
+		writer = csv.DictWriter(output_file, headers)
 
 		# Write the headers to the CSV file
 		writer.writeheader()
@@ -275,10 +277,11 @@ def write_output_file(output_csv: str, student_tree: list) -> None:
 	headers = list(all_headers)
 	headers.sort()
 
-	# Open the file in write mode
-	with open(output_csv, 'w', newline='') as output_file:
-		# Initialize a CSV DictWriter with the sorted headers and a tab delimiter
-		writer = csv.DictWriter(output_file, headers, delimiter='\t')
+	# Open the file in write mode. Comma-delimited + UTF-8 so the file
+	# round-trips cleanly through spreadsheet tools. csv.DictWriter
+	# handles embedded commas via RFC 4180 quoting.
+	with open(output_csv, 'w', newline='', encoding='utf-8') as output_file:
+		writer = csv.DictWriter(output_file, headers)
 
 		# Write the headers to the CSV file
 		writer.writeheader()

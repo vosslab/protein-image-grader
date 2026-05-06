@@ -65,7 +65,10 @@ def _read_csv_rows(path: pathlib.Path) -> tuple:
 		Tuple of (header, rows) where header is the first row as a list
 		of strings and rows is a list of subsequent rows.
 	"""
-	with open(path, "r", encoding="utf-8", newline="") as handle:
+	# utf-8-sig strips an Excel BOM (U+FEFF) if present so the first
+	# header cell is not prefixed with the BOM character (matches the
+	# file_io_protein readers' policy).
+	with open(path, "r", encoding="utf-8-sig", newline="") as handle:
 		reader = csv.reader(handle)
 		all_rows = list(reader)
 	if not all_rows:
