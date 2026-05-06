@@ -2,10 +2,13 @@
 Tests for protein_image_grader.form_columns.resolve_meta_columns.
 """
 
+# Standard Library
 import textwrap
 
+# PIP3 modules
 import pytest
 
+# local repo modules
 import protein_image_grader.form_columns as form_columns
 import protein_image_grader.file_io_protein as file_io_protein
 
@@ -74,8 +77,10 @@ def test_case_and_whitespace_insensitive():
 
 def test_ambiguous_username_columns_raise():
 	header = _baseline()
-	# Both Username and Email Address present in the same form.
-	header.append("Email Address")
+	# Both Username and Email Address present within the identity prefix.
+	# Replace the upload column (index 5) so the duplicate falls inside
+	# the scanned identity prefix, not in question-column territory.
+	header[5] = "Email Address"
 	with pytest.raises(ValueError) as excinfo:
 		form_columns.resolve_meta_columns(header)
 	message = str(excinfo.value)
@@ -85,8 +90,9 @@ def test_ambiguous_username_columns_raise():
 
 def test_ambiguous_student_id_columns_raise():
 	header = _baseline()
-	# Both "Enter your RUID" (baseline) and "Student ID" present.
-	header.append("Student ID")
+	# Both "Enter your RUID" (baseline) and "Student ID" present within
+	# the identity prefix.
+	header[5] = "Student ID"
 	with pytest.raises(ValueError) as excinfo:
 		form_columns.resolve_meta_columns(header)
 	message = str(excinfo.value)
@@ -94,6 +100,38 @@ def test_ambiguous_student_id_columns_raise():
 	# can see what conflicted, not just the canonical key.
 	assert "Student ID" in message
 	assert "Enter your RUID" in message
+
+
+def test_question_column_past_prefix_does_not_collide_with_last_name():
+	# A question column that token-matches an identity alias must be
+	# ignored when it appears past the identity prefix. Previously this
+	# raised an ambiguous-Last Name error during real grading runs.
+	header = _baseline()
+	header.append(
+		"What is the FULL NAME of the LAST AUTHOR on the Science publication"
+	)
+	# Default scan: cap suppresses the collision.
+	resolved = form_columns.resolve_meta_columns(header)
+	assert resolved["Last Name"] == 3
+	# Companion assertion: prove the bug is real and only the cap hides
+	# it. Scanning the full header must raise ambiguous-Last Name.
+	with pytest.raises(ValueError) as excinfo:
+		form_columns.resolve_meta_columns(header, search_limit=len(header))
+	assert "Last Name" in str(excinfo.value)
+
+
+def test_collision_at_exact_prefix_boundary_is_excluded():
+	# The cell at index IDENTITY_PREFIX_COLUMNS is the first EXCLUDED
+	# index. Inserting a Last Name alias there must not trigger an
+	# ambiguity error; an off-by-one in the slice would surface here.
+	header = _baseline()
+	# Pad to exactly IDENTITY_PREFIX_COLUMNS cells before adding the
+	# would-collide cell at the boundary.
+	while len(header) < form_columns.IDENTITY_PREFIX_COLUMNS:
+		header.append("filler question column")
+	header.append("Last Name")
+	resolved = form_columns.resolve_meta_columns(header)
+	assert resolved["Last Name"] == 3
 
 
 def test_missing_only_username_lists_only_username():

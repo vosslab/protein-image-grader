@@ -18,6 +18,14 @@ keyword set is matched as a token-set: every keyword must appear as a
 whole-word token in the normalized header. Example: to recognize
 "Net ID" as a Username column, append `["net", "id"]` to the
 "Username" alias list.
+
+Scan window: the resolver only inspects the first IDENTITY_PREFIX_COLUMNS
+header cells. Identity columns always occupy the start of the form CSV,
+and capping the scan prevents question columns like "What is the FULL
+NAME of the LAST AUTHOR..." from token-matching the ["last", "name"]
+alias and triggering false ambiguity errors. If a future form ever
+places an identity column past column 5, raise IDENTITY_PREFIX_COLUMNS
+or pass search_limit explicitly at the call site.
 """
 
 # Standard Library
@@ -92,7 +100,22 @@ def header_matches_alias(tokens: list, keywords: list) -> bool:
 
 
 #============================================
-def resolve_meta_columns(header_list: list, required=None) -> dict:
+# Identity columns (timestamp, Username, First/Last Name, Student ID) are
+# always positioned at the start of the Google Form CSV, before any
+# assignment-specific question columns. Scanning the whole header row
+# causes false positives such as "What is the FULL NAME of the LAST
+# AUTHOR..." matching the ["last", "name"] alias for Last Name. Capping
+# the search to the first IDENTITY_PREFIX_COLUMNS columns keeps matching
+# robust without requiring the caller to know question-column indices.
+IDENTITY_PREFIX_COLUMNS = 6
+
+
+#============================================
+def resolve_meta_columns(
+	header_list: list,
+	required: set = None,
+	search_limit: int = IDENTITY_PREFIX_COLUMNS,
+) -> dict:
 	"""
 	Resolve standard identity columns from a CSV header row.
 
@@ -107,6 +130,12 @@ def resolve_meta_columns(header_list: list, required=None) -> dict:
 			skip the missing-key check entirely; the caller can then
 			inspect the returned dict for which keys actually
 			resolved.
+		search_limit: maximum number of header cells to scan from the
+			start of the row. Defaults to IDENTITY_PREFIX_COLUMNS. Pass
+			a larger value only if a future form places an identity
+			column past the standard prefix; pass len(header_list) to
+			disable the cap entirely (mainly useful in tests that need
+			to confirm a question column would collide if not capped).
 
 	Returns:
 		dict mapping each canonical key that was successfully
@@ -124,8 +153,11 @@ def resolve_meta_columns(header_list: list, required=None) -> dict:
 	if required is None:
 		required = set(STANDARD_META_COLUMNS.keys())
 
-	# Pre-tokenize once.
-	tokenized = [_tokenize_header(cell) for cell in header_list]
+	# Pre-tokenize once. Cap scan to identity prefix so question columns
+	# like "What is the FULL NAME of the LAST AUTHOR..." cannot collide
+	# with identity aliases such as ["last", "name"].
+	scan_end = min(search_limit, len(header_list))
+	tokenized = [_tokenize_header(cell) for cell in header_list[:scan_end]]
 
 	resolved = {}
 	for canonical_key, alias_list in STANDARD_META_COLUMNS.items():
