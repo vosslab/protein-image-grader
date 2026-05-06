@@ -1,5 +1,6 @@
 
 # Standard Library
+import os
 import csv
 
 # PIP3 modules
@@ -7,6 +8,47 @@ import yaml
 
 # local repo modules
 import protein_image_grader.form_columns as form_columns
+
+#==============
+def _short_path(path: str) -> str:
+	"""Return the shortest readable form of a filesystem path for console output.
+
+	The repo often holds a symlink (e.g. ``Protein_Images/``) whose target is
+	on an external volume. The absolute output path comes back resolved
+	through the symlink target, so plain ``os.path.relpath`` produces a long
+	``../../../Volumes/...`` string. This helper walks the symlinks at the
+	CWD level and rewrites ``path`` through any symlink whose realpath is a
+	prefix, then picks the shortest of the candidates considered.
+
+	Args:
+		path: Filesystem path to render. May be absolute or relative.
+
+	Returns:
+		The shortest of: the original ``path``, ``os.path.relpath(path)``,
+		a ``~``-anchored HOME-relative form (when ``path`` is under
+		``$HOME``), and any rewrite through a CWD symlink whose realpath
+		prefixes ``path``.
+	"""
+	candidates = [path]
+	# Rewrite through a CWD symlink whose target prefixes `path`.
+	cwd = os.getcwd()
+	real_path = os.path.realpath(path)
+	for entry in os.listdir(cwd):
+		full = os.path.join(cwd, entry)
+		if not os.path.islink(full):
+			continue
+		link_real = os.path.realpath(full)
+		# `+ os.sep` guards against false prefix matches like /foo vs /foobar.
+		if real_path == link_real or real_path.startswith(link_real + os.sep):
+			tail = real_path[len(link_real):].lstrip(os.sep)
+			candidates.append(os.path.join(entry, tail) if tail else entry)
+	# cwd-relative (will use the symlinked form if path was already given that way)
+	candidates.append(os.path.relpath(path))
+	# HOME-relative with ~
+	home = os.path.expanduser("~")
+	if path.startswith(home + os.sep):
+		candidates.append("~" + path[len(home):])
+	return min(candidates, key=len)
 
 #==============
 def read_student_csv_data(input_csv: str, config: dict) -> list:
@@ -125,7 +167,7 @@ def read_student_ids(student_ids_csv: str) -> list:
 	"""
 
 	# Print the filename to the console for tracking
-	print(f"reading from file {student_ids_csv}")
+	print(f"reading from file {_short_path(student_ids_csv)}")
 
 	# Initialize variables for storing header data and student IDs
 	header_list = None
@@ -182,7 +224,7 @@ def write_student_grades_for_upload(assignment_name: str, grades_csv: str, stude
 	"""
 
 	# Displaying the file name to which grades will be written
-	print(f"writing to file {grades_csv}")
+	print(f"writing to file {_short_path(grades_csv)}")
 
 	# Initialize a list to hold the headers needed for the CSV file
 	headers = ['First Name', 'Last Name', 'Username', 'Student ID', assignment_name]
@@ -220,7 +262,7 @@ def write_output_file(output_csv: str, student_tree: list) -> None:
 	"""
 
 	# Print the name of the output CSV file
-	print(f"writing CSV to file {output_csv}")
+	print(f"writing CSV to file {_short_path(output_csv)}")
 
 	# Initialize a set to hold unique header fields
 	all_headers = set()
@@ -264,7 +306,7 @@ def backup_tree_to_yaml(file_name: str, tree: list) -> None:
 	"""
 
 	# Print the name of the output YAML file using f-string
-	print(f"writing YAML to file {file_name}")
+	print(f"writing YAML to file {_short_path(file_name)}")
 
 	# Use 'with' statement to ensure the file is properly closed after writing
 	with open(file_name, 'w') as yaml_file:
