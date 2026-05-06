@@ -12,6 +12,7 @@ import argparse
 import yaml
 import PIL.Image
 import pillow_heif
+import rich.console
 import googleapiclient.errors
 
 # local repo modules
@@ -21,6 +22,10 @@ import protein_image_grader.archive_paths as archive_paths
 import protein_image_grader.protein_images_path as protein_images_path
 
 pillow_heif.register_heif_opener()
+
+# Module-level Rich console; markup=False on every call so file paths
+# containing stray characters never get parsed as Rich tags.
+console = rich.console.Console(highlight=False)
 
 fail_count = 0
 
@@ -34,7 +39,8 @@ def parse_args():
 	"""
 	parser = argparse.ArgumentParser(description="Download submission images and build an HTML review page.")
 	parser.add_argument('-i', '--input', dest='csvfile',
-		type=str, required=True, help="Input CSV file")
+		type=str, default=None,
+		help="Input CSV file (omit to look up by --image-number or use --all)")
 	parser.add_argument('-x', '--max-students', dest='maxstudents', default=-1,
 		type=int, required=False, help="Max Students, used for testing")
 	parser.add_argument('-t', '--trim', dest='trim', action='store_true')
@@ -52,7 +58,12 @@ def parse_args():
 	parser.add_argument('-p', '--profiles-html', dest='profiles_html', type=str,
 		help="Output HTML file name", default=None)
 	parser.add_argument('--image-number', dest='image_number', default=0,
-		type=int, required=False)
+		type=int, required=False,
+		help="Image number 1-20; with no -i, resolves canonical form CSV.")
+	parser.add_argument('--term', dest='term', type=str, default=None,
+		help="Active term, e.g. spring_2026 (defaults to active_term.txt).")
+	parser.add_argument('-a', '--all', dest='all_images', action='store_true',
+		help="Bulk-download every canonical form CSV in the active term.")
 	args = parser.parse_args()
 	return args
 
@@ -172,7 +183,7 @@ def get_image_html_tag(image_url: str, ruid: int, args, image_dir: str,
 		if not was_saved:
 			return ''
 	else:
-		print(f"file exists: {filename}")
+		console.print(f"file exists: {filename}", style="dim yellow")
 
 	archive_path = archive_image_if_needed(filepath, archive_dir)
 	if archive_path and image_hashes is not None:
@@ -210,9 +221,11 @@ def try_download_image(file_id: str) -> tuple:
 		return image_data, original_filename
 	except googleapiclient.errors.HttpError as e:
 		fail_count += 1
-		print(f"Error downloading image: {e}")
+		console.print(f"Error downloading image: {e}", style="bold red")
 		time.sleep(random.random())
-		print("check permissions of the folder for vosslab-12389@protein-images.iam.gserviceaccount.com")
+		console.print(
+			"check permissions of the folder for vosslab-12389@protein-images.iam.gserviceaccount.com",
+			style="red")
 		if fail_count > 2:
 			raise ValueError
 		return None, ''
@@ -255,7 +268,7 @@ def download_and_save_image(image_data, filepath: str) -> bool:
 		return False
 	pil_image = PIL.Image.open(image_data)
 	pil_image.save(filepath)
-	print(f"saved {os.path.basename(filepath)}")
+	console.print(f"saved {os.path.basename(filepath)}", style="bold green")
 	return True
 
 #============================================
@@ -295,7 +308,7 @@ def trim_and_save_image(filepath: str, rotate: bool=False) -> str:
 		trimmed_image = trimmed_image.convert('RGB')
 	trim_path = os.path.splitext(filepath)[0] + '-trim.jpg'
 	trimmed_image.save(trim_path)
-	print(f"saved {os.path.basename(trim_path)}")
+	console.print(f"saved {os.path.basename(trim_path)}", style="bold green")
 	return trim_path
 
 #============================================
@@ -448,7 +461,7 @@ def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: 
 	Generate an HTML file based on the CSV data.
 	"""
 	if args.image_number == 0:
-		args.image_number = extract_number_in_range(csvfile)
+		args.image_number = extract_number_in_range(os.path.basename(csvfile))
 
 	with open(output_html, "w") as output:
 		write_header(output, csvfile)
@@ -516,40 +529,131 @@ def write_html_from_student_tree(student_tree: list, output_html: str) -> None:
 	return
 
 #============================================
-def main():
+def resolve_csv_paths(args) -> list:
 	"""
-	Main function to parse arguments and process the CSV file.
+	Decide which CSV(s) this run should process.
+
+	Priority:
+	1. If args.csvfile is set: [Path(args.csvfile)] (verbatim, legacy).
+	2. If args.all_images: every canonical CSV for the active term, sorted
+	   by image number. Duplicates are skipped with a warning.
+	3. If args.image_number > 0: the single canonical CSV matching that
+	   number from the active term's forms dir.
+	4. Else: ValueError.
 	"""
-	args = parse_args()
+	if args.csvfile is not None:
+		return [pathlib.Path(args.csvfile)]
+	if args.all_images:
+		term = protein_images_path.get_active_term(args.term)
+		by_image = protein_images_path.find_canonical_form_csvs(term)
+		if not by_image:
+			forms_dir = protein_images_path.get_forms_dir(term)
+			raise FileNotFoundError(
+				f"No canonical form CSVs found in {forms_dir}"
+			)
+		paths = []
+		for image_number in sorted(by_image.keys()):
+			matches = by_image[image_number]
+			if len(matches) >= 2:
+				listing = "\n".join(f"    {p}" for p in matches)
+				console.print(
+					f"WARNING: skipping image {image_number:02d}; "
+					f"multiple canonical CSVs:\n{listing}",
+					style="bold yellow",
+				)
+				continue
+			paths.append(matches[0])
+		return paths
+	if args.image_number > 0:
+		term = protein_images_path.get_active_term(args.term)
+		by_image = protein_images_path.find_canonical_form_csvs(term)
+		matches = by_image.get(args.image_number, [])
+		if len(matches) == 0:
+			forms_dir = protein_images_path.get_forms_dir(term)
+			raise FileNotFoundError(
+				f"No canonical form CSV for image {args.image_number:02d}"
+				f" in {forms_dir}"
+			)
+		if len(matches) >= 2:
+			listing = "\n".join(f"  {p}" for p in matches)
+			raise ValueError(
+				f"Multiple canonical form CSVs for image"
+				f" {args.image_number:02d}:\n{listing}"
+			)
+		return [matches[0]]
+	raise ValueError(
+		"No CSV selected. Pass one of: -i/--input <path>,"
+		" --image-number N, or --all."
+	)
 
-	header, data_tree = read_csv(args.csvfile, args.maxstudents)
 
-	if args.image_number == 0:
-		args.image_number = extract_number_in_range(args.csvfile)
+#============================================
+def process_one_csv(csvfile: str, args, image_hashes: dict,
+		hashes_changed: list, open_browser: bool) -> None:
+	"""
+	Run the per-CSV pipeline: read CSV, resolve output dir, generate HTML.
+
+	Mutates args.image_number (resolved from the basename) and
+	args.profiles_html (per-CSV path) so generate_html sees the right
+	values; the bulk loop resets these between iterations.
+	"""
+	header, data_tree = read_csv(csvfile, args.maxstudents)
+
+	# Use the basename only; the absolute CSV path may contain stray
+	# digits (e.g. "/Ex2GB/..." or "/bchm_355-lecture/...") that the
+	# 1-20 fallback would otherwise pick up before the real NN token.
+	args.image_number = extract_number_in_range(os.path.basename(csvfile))
 
 	# Phase 0 (start_grading.py plan): canonical CSVs imply canonical output
 	# under Protein_Images/semesters/<term>/submissions/download_NN_raw/.
 	# Non-canonical CSVs require an explicit --output-dir.
-	image_dir = resolve_image_dir(args.csvfile, args.output_dir, args.image_number)
+	image_dir = resolve_image_dir(csvfile, args.output_dir, args.image_number)
 	if not os.path.isdir(image_dir):
 		os.makedirs(image_dir)
+	console.print(
+		f"  image {args.image_number:02d} -> {image_dir}",
+		style="green")
 
 	# profiles_html lands in the parent of image_dir so the canonical layout
 	# keeps each image's profile page next to its download_NN_raw folder.
-	if args.profiles_html is None:
-		profiles_parent = os.path.dirname(image_dir)
-		args.profiles_html = os.path.join(
-			profiles_parent, f"profiles_image_{args.image_number:02d}.html")
+	profiles_parent = os.path.dirname(image_dir)
+	profiles_html = os.path.join(
+		profiles_parent, f"profiles_image_{args.image_number:02d}.html")
+	args.profiles_html = profiles_html
 
 	archive_dir = get_archive_assignment_dir(args.image_number, "spec_yaml_files")
+
+	generate_html(csvfile, header, data_tree, args, image_dir, archive_dir,
+		profiles_html, image_hashes, hashes_changed)
+	if open_browser:
+		open_html_in_browser(profiles_html)
+
+
+#============================================
+def main():
+	"""
+	Main function to parse arguments and process the CSV file(s).
+	"""
+	args = parse_args()
+	csv_paths = resolve_csv_paths(args)
+
+	# --output-dir cannot be combined with multi-CSV runs because every CSV
+	# would land in the same dir.
+	if args.output_dir is not None and len(csv_paths) > 1:
+		raise ValueError("--output-dir cannot be used with --all (would collide).")
 
 	image_hashes_yaml = str(archive_paths.get_image_hashes_path())
 	image_hashes = load_image_hashes(image_hashes_yaml)
 	hashes_changed = [False]
 
-	generate_html(args.csvfile, header, data_tree, args, image_dir, archive_dir,
-		args.profiles_html, image_hashes, hashes_changed)
-	open_html_in_browser(args.profiles_html)
+	# Open browser only for single-CSV runs, so --all does not spawn 10 tabs.
+	open_browser = len(csv_paths) == 1
+
+	for csv_path in csv_paths:
+		console.print(f"=== {csv_path}", style="bold cyan")
+		process_one_csv(str(csv_path), args, image_hashes, hashes_changed,
+			open_browser)
+
 	if hashes_changed[0]:
 		with open(image_hashes_yaml, 'w') as f:
 			yaml.dump(image_hashes, f)

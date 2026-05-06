@@ -141,11 +141,24 @@ def test_status_row_for_complete_image(tmp_path, monkeypatch):
 	(grades / "output-protein_image_01.csv").write_text("", encoding="ascii")
 	(grades / "blackboard_upload-protein_image_01.csv").write_text(
 		"", encoding="ascii")
+	# Graded YAML + email log marking the only expected student as sent.
+	import yaml as _yaml
+	import protein_image_grader.email_log as _email_log
+	graded_yaml = grades / "output-protein_image_01.yml"
+	graded_yaml.write_text(_yaml.safe_dump([{
+		"Student ID": "900000001",
+		"Username": "alice",
+	}]), encoding="ascii")
+	data = {}
+	_email_log.set_status(data, "900000001", 1, "sent",
+		"2026-05-06T14:32:11", "alice", "alice@mail.roosevelt.edu")
+	_email_log.save("spring_2026", data)
 	canonical_csvs = sg.find_canonical_form_csvs("spring_2026")
 	row = sg.build_status_row(1, "spring_2026", canonical_csvs)
 	assert row["form"] == "OK"
 	assert row["downloaded"] == "OK"
 	assert row["graded"] == "OK"
+	assert row["emailed"] == "OK"
 	assert row["bb_upload"] == "OK"
 	assert row["next_step"] == "done"
 
@@ -158,6 +171,7 @@ def test_status_row_for_missing_image(tmp_path, monkeypatch):
 	assert row["form"] == "MISSING"
 	assert row["downloaded"] == "MISSING"
 	assert row["graded"] == "MISSING"
+	assert row["emailed"] == "MISSING"
 	assert row["bb_upload"] == "MISSING"
 	assert row["next_step"] == "add form CSV"
 
@@ -168,13 +182,24 @@ def test_status_row_next_step_progression():
 		"MISSING") == "add form CSV"
 	assert sg.compute_next_step("DUPLICATE", "MISSING", "MISSING",
 		"MISSING") == "fix duplicate CSV"
+	# Download is folded into the grade step (non-interactive); whenever
+	# the form CSV is OK and grading has not happened, the next action is
+	# "grade" regardless of download state.
 	assert sg.compute_next_step("OK", "MISSING", "MISSING",
-		"MISSING") == "download"
+		"MISSING") == "grade"
 	assert sg.compute_next_step("OK", "OK", "MISSING",
 		"MISSING") == "grade"
-	assert sg.compute_next_step("OK", "OK", "OK",
-		"MISSING") == "regrade or upload"
-	assert sg.compute_next_step("OK", "OK", "OK", "OK") == "done"
+	# Graded but email log missing/partial -> email step.
+	assert sg.compute_next_step("OK", "OK", "OK", "MISSING",
+		emailed_status="MISSING") == "email"
+	assert sg.compute_next_step("OK", "OK", "OK", "MISSING",
+		emailed_status="PARTIAL") == "email"
+	# Email done, BB still missing -> regrade or upload.
+	assert sg.compute_next_step("OK", "OK", "OK", "MISSING",
+		emailed_status="OK") == "regrade or upload"
+	# Everything done.
+	assert sg.compute_next_step("OK", "OK", "OK", "OK",
+		emailed_status="OK") == "done"
 
 
 # ---- command construction -------------------------------------------------

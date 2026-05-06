@@ -6,9 +6,13 @@ joins data-root paths by hand. Resolution happens inside functions only;
 importing this module performs no filesystem access.
 """
 
+import re
 import pathlib
 
 import protein_image_grader.archive_paths
+
+
+CANONICAL_FORM_CSV_RE = re.compile(r'^BCHM_Prot_Img_(\d{2})-.+\.csv$')
 
 
 PROTEIN_IMAGES_NAME = "Protein_Images"
@@ -16,6 +20,7 @@ IMAGE_BANK_SUBDIR = "image_bank"
 SEMESTERS_SUBDIR = "semesters"
 ACTIVE_TERM_FILENAME = "active_term.txt"
 ROSTER_FILENAME = "roster.csv"
+EMAIL_LOG_FILENAME = "email_log.yml"
 FORMS_SUBDIR = "forms"
 YAML_SUBDIR = "yaml"
 GRADES_SUBDIR = "grades"
@@ -103,6 +108,31 @@ def get_submissions_dir(term: str) -> pathlib.Path:
 
 def get_roster_csv(term: str) -> pathlib.Path:
 	return get_term_dir(term) / ROSTER_FILENAME
+
+
+def get_email_log_yaml(term: str) -> pathlib.Path:
+	# Per-term email status log; sits alongside roster.csv at the term root.
+	return get_term_dir(term) / EMAIL_LOG_FILENAME
+
+
+def find_canonical_form_csvs(term: str) -> dict:
+	"""
+	Return {image_number: [csv_paths]} from the canonical forms dir.
+
+	Missing forms dir yields an empty dict; multiple matches per image
+	number are preserved so callers can detect duplicates.
+	"""
+	forms_dir = get_forms_dir(term)
+	by_image = {}
+	if not forms_dir.is_dir():
+		return by_image
+	for csv_path in sorted(forms_dir.glob("BCHM_Prot_Img_*.csv")):
+		match = CANONICAL_FORM_CSV_RE.match(csv_path.name)
+		if match is None:
+			continue
+		image_number = int(match.group(1))
+		by_image.setdefault(image_number, []).append(csv_path)
+	return by_image
 
 
 def get_credentials_dir() -> pathlib.Path:

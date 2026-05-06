@@ -15,17 +15,20 @@ import argparse
 import subprocess
 
 # PIP3 modules
+import yaml
 import tabulate
 
 # local repo modules
+import protein_image_grader.email_log as email_log
 import protein_image_grader.archive_paths as archive_paths
 import protein_image_grader.protein_images_path as protein_images_path
 
 
 EXPECTED_IMAGE_NUMBERS = tuple(range(1, 11))
-STEP_CHOICES = ("download", "grade", "regrade")
+STEP_CHOICES = ("grade", "regrade", "email")
 DOWNLOAD_SCRIPT = "download_submission_images.py"
 GRADE_SCRIPT = "grade_protein_image.py"
+EMAIL_SCRIPT = "send_feedback_email.py"
 BB_ASSIGNMENT_IDS_FILENAME = "blackboard_assignment_ids.txt"
 
 
@@ -62,27 +65,11 @@ def find_repo_root_form_csvs() -> list:
 #============================================
 def find_canonical_form_csvs(term: str) -> dict:
 	"""
-	Return a dict {image_number: [matching CSV paths]} from the canonical
-	forms dir. Missing dir yields an empty dict; multiple matches per
-	image number are preserved so callers can detect duplicates.
+	Thin wrapper around protein_images_path.find_canonical_form_csvs so this
+	module's existing callers keep working. The shared helper is the source
+	of truth for canonical form-CSV lookup.
 	"""
-	forms_dir = protein_images_path.get_forms_dir(term)
-	by_image = {}
-	if not forms_dir.is_dir():
-		return by_image
-	for csv_path in sorted(forms_dir.glob("BCHM_Prot_Img_*.csv")):
-		# basename pattern is BCHM_Prot_Img_NN-<label>.csv
-		stem_parts = csv_path.name.split("_")
-		# Robust extraction: take the first 2-digit run after BCHM_Prot_Img_
-		number_token = csv_path.name[len("BCHM_Prot_Img_"):][:2]
-		if not number_token.isdigit():
-			# Skip oddly-named files; they are not canonical anyway.
-			continue
-		image_number = int(number_token)
-		by_image.setdefault(image_number, []).append(csv_path)
-		# stem_parts is currently unused but kept for future debug printing.
-		del stem_parts
-	return by_image
+	return protein_images_path.find_canonical_form_csvs(term)
 
 
 #============================================
@@ -178,14 +165,17 @@ def build_status_row(image_number: int, term: str,
 	bb_csv = grades_dir / f"blackboard_upload-protein_image_{image_number:02d}.csv"
 	bb_status = "OK" if bb_csv.is_file() else "MISSING"
 
+	emailed_status = compute_emailed_status(term, image_number, graded_status)
+
 	next_step = compute_next_step(form_status, downloaded_status,
-		graded_status, bb_status)
+		graded_status, bb_status, emailed_status=emailed_status)
 
 	row = {
 		"image": f"{image_number:02d}",
 		"form": form_status,
 		"downloaded": downloaded_status,
 		"graded": graded_status,
+		"emailed": emailed_status,
 		"bb_upload": bb_status,
 		"next_step": next_step,
 	}
@@ -193,20 +183,58 @@ def build_status_row(image_number: int, term: str,
 
 
 #============================================
+def compute_emailed_status(term: str, image_number: int,
+		graded_status: str) -> str:
+	"""
+	Compute the dashboard 'Emailed' column for one image.
+
+	Returns "MISSING" when grading has not happened yet (nothing to email)
+	or when the email log has no entry for any expected student. Otherwise
+	delegates to email_log.summarize_image with the Student IDs taken from
+	the graded YAML.
+	"""
+	if graded_status != "OK":
+		return "MISSING"
+	graded_yaml = (
+		grades_dir_for(term)
+		/ f"output-protein_image_{image_number:02d}.yml"
+	)
+	if not graded_yaml.is_file():
+		return "MISSING"
+	with open(graded_yaml, "r", encoding="utf-8") as handle:
+		student_tree = yaml.safe_load(handle)
+	if not student_tree:
+		return "MISSING"
+	expected_ids = [str(entry["Student ID"]) for entry in student_tree]
+	data = email_log.load(term)
+	return email_log.summarize_image(data, image_number, expected_ids)
+
+
+#============================================
 def compute_next_step(form_status: str, downloaded_status: str,
-		graded_status: str, bb_status: str) -> str:
+		graded_status: str, bb_status: str,
+		emailed_status: str = "MISSING") -> str:
 	"""
 	Pick the most useful next action verb for one image row.
+
+	emailed_status is keyword-only with a default so older callers passing
+	four positional values keep working. After grading is done, the next
+	action is 'email' until every expected student has status 'sent' in
+	the per-term email log.
 	"""
 	if form_status == "DUPLICATE":
 		return "fix duplicate CSV"
 	if form_status == "MISSING":
 		return "add form CSV"
-	if downloaded_status != "OK":
-		return "download"
+	# Download is non-interactive, so it is folded into the grade step:
+	# whenever the form CSV is OK but grading has not happened, the next
+	# action is "grade" (which auto-downloads first if needed).
 	if graded_status != "OK":
 		return "grade"
-	# Graded already; suggest regrade if late submissions might exist.
+	# Graded already; email feedback before treating the image as done.
+	if emailed_status != "OK":
+		return "email"
+	# Suggest regrade if late submissions might exist.
 	if bb_status != "OK":
 		return "regrade or upload"
 	return "done"
@@ -221,10 +249,10 @@ def render_dashboard(term: str) -> str:
 	rows = [build_status_row(n, term, canonical_csvs)
 		for n in EXPECTED_IMAGE_NUMBERS]
 	headers = ["Image", "Form CSV", "Downloaded", "Graded",
-		"BB upload", "Next step"]
+		"Emailed", "BB upload", "Next step"]
 	table_rows = [
 		[r["image"], r["form"], r["downloaded"], r["graded"],
-			r["bb_upload"], r["next_step"]]
+			r["emailed"], r["bb_upload"], r["next_step"]]
 		for r in rows
 	]
 	output = ""
@@ -340,6 +368,21 @@ def build_grade_command(image_number: int, term: str) -> list:
 
 
 #============================================
+def build_email_command(image_number: int, term: str) -> list:
+	"""
+	Construct the argv list to invoke send_feedback_email.py for one image.
+
+	Never passes -e/--send-email; the operator must promote a real send by
+	calling send_feedback_email.py directly with -e.
+	"""
+	return [
+		sys.executable, EMAIL_SCRIPT,
+		"-i", str(image_number),
+		"--term", term,
+	]
+
+
+#============================================
 def confirm_overwrite(prompt: str) -> bool:
 	"""
 	Ask for y/N. Default is N. Always interactive; no --yes bypass flag.
@@ -358,7 +401,7 @@ def require_resources(term: str, step: str) -> None:
 		raise FileNotFoundError(
 			f"forms dir missing for {term}: {forms_dir}"
 		)
-	if step in ("grade", "regrade"):
+	if step in ("grade", "regrade", "email"):
 		roster = protein_images_path.get_roster_csv(term)
 		if not roster.is_file():
 			raise FileNotFoundError(
@@ -379,20 +422,21 @@ def run_step(term: str, image_number: int, step: str) -> int:
 	require_resources(term, step)
 	canonical_csv = resolve_canonical_csv(term, image_number)
 
-	if step == "download":
-		command = build_download_command(canonical_csv)
+	if step == "grade":
+		# Download is non-interactive, so auto-run it when the canonical
+		# download dir for this image is empty/missing. Existing non-empty
+		# downloads are kept as-is (no overwrite prompt) so re-runs do not
+		# re-fetch hundreds of images.
 		download_dir = (
 			submissions_dir_for(term) / f"download_{image_number:02d}_raw"
 		)
-		if is_non_empty_dir(download_dir):
-			ok = confirm_overwrite(
-				f"Existing download dir is non-empty:\n  {download_dir}\n"
-				f"Re-run download anyway?"
-			)
-			if not ok:
-				print("Aborted.")
-				return 1
-	elif step == "grade":
+		if not is_non_empty_dir(download_dir):
+			download_command = build_download_command(canonical_csv)
+			download_command_string = " ".join(download_command)
+			print(f"+ {download_command_string}")
+			download_result = subprocess.run(download_command)
+			if download_result.returncode != 0:
+				return download_result.returncode
 		command = build_grade_command(image_number, term)
 		graded_csv = (
 			grades_dir_for(term)
@@ -420,6 +464,19 @@ def run_step(term: str, image_number: int, step: str) -> int:
 			if not ok:
 				print("Aborted.")
 				return 1
+	elif step == "email":
+		# Idempotency comes from email_log.yml inside send_feedback_email.py;
+		# the orchestrator never opts in to -e/--send-email, so this run
+		# always defaults to dry-run.
+		graded_yaml = (
+			grades_dir_for(term)
+			/ f"output-protein_image_{image_number:02d}.yml"
+		)
+		if not graded_yaml.is_file():
+			raise FileNotFoundError(
+				f"Graded YAML required for email step: {graded_yaml}"
+			)
+		command = build_email_command(image_number, term)
 	else:
 		raise ValueError(f"Unsupported step: {step}")
 
@@ -436,15 +493,6 @@ def prompt_for_image_number() -> int:
 	if number not in EXPECTED_IMAGE_NUMBERS:
 		raise ValueError(f"Image number must be in 1-10, got {number}")
 	return number
-
-
-#============================================
-def prompt_for_step() -> str:
-	choices = "/".join(STEP_CHOICES)
-	answer = input(f"Step? [{choices}]: ").strip().lower()
-	if answer not in STEP_CHOICES:
-		raise ValueError(f"Step must be one of {STEP_CHOICES}, got {answer!r}")
-	return answer
 
 
 #============================================
@@ -482,6 +530,33 @@ def main():
 
 	step = args.step
 	if step is None:
-		step = prompt_for_step()
+		step = auto_select_step(term, image_number)
+		print(f"Step: {step} (auto-selected)")
 
 	return run_step(term, image_number, step)
+
+
+#============================================
+def auto_select_step(term: str, image_number: int) -> str:
+	"""
+	Pick the next actionable step for one image. Steps are sequential, so
+	the dashboard's computed next_step is authoritative; we only collapse
+	the few non-actionable cases into hard errors.
+	"""
+	canonical_csvs = find_canonical_form_csvs(term)
+	row = build_status_row(image_number, term, canonical_csvs)
+	next_step = row["next_step"]
+	if next_step == "grade":
+		return "grade"
+	if next_step == "email":
+		return "email"
+	if next_step == "regrade or upload":
+		return "regrade"
+	if next_step == "done":
+		raise ValueError(
+			f"Image {image_number:02d} is already complete; pass -s regrade to redo."
+		)
+	raise ValueError(
+		f"Image {image_number:02d} cannot be auto-stepped (next_step={next_step!r}); "
+		"resolve the dashboard warning first."
+	)

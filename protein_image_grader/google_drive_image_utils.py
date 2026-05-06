@@ -455,7 +455,6 @@ def download_image(file_id):
 	# Use an in-memory byte stream to hold the downloaded file
 	file_data = io.BytesIO()
 
-	print("downloader = googleapiclient.http.MediaIoBaseDownload(file_data, request)")
 	# Initialize downloader
 	downloader = googleapiclient.http.MediaIoBaseDownload(file_data, request)
 
