@@ -17,6 +17,7 @@ Protein_Images/
     <term>/                                 # e.g., spring_2026
       forms/
         BCHM_Prot_Img_NN-*.csv             # form submissions
+        quarantine.log                      # rows the resolver could not match (appended)
       roster.csv                            # student roster for the term
       email_log.yml                         # per-image email status log
       <image_dir>/                          # e.g., BCHM_Prot_Img_04_Active_Site
@@ -35,6 +36,7 @@ Protein_Images/
           <RUID>-proteinNN-*.png
         trim/                               # archived trimmed images
           <RUID>-proteinNN-*-trim.jpg
+```
 
 ## Path resolution
 - `protein_image_grader/protein_images_path.py` centralizes all Protein_Images/ path logic.

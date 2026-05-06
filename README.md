@@ -31,7 +31,7 @@ With no flags it prints a per-image dashboard for the active term. `start_gradin
 
 - [docs/USAGE.md](docs/USAGE.md): inputs, outputs, archive behavior, and CLI flags.
 - [docs/FILE_STRUCTURE.md](docs/FILE_STRUCTURE.md): canonical `Protein_Images/` and repo layout.
-- [docs/ARCHIVE_PROCESS.md](docs/ARCHIVE_PROCESS.md): cross-year hash archive and duplicate detection.
+- [docs/IMAGE_BANK_POLICY.md](docs/IMAGE_BANK_POLICY.md): cross-year image bank, hash database, duplicate detection, and dual-write policy.
 - [docs/RUID_POLICY.md](docs/RUID_POLICY.md): Form RUID vs Roster RUID rules for filenames and CSVs.
 - [docs/PYTHON_STYLE.md](docs/PYTHON_STYLE.md): Python conventions enforced in this repo.
 - [docs/REPO_STYLE.md](docs/REPO_STYLE.md): repo-wide layout, naming, and changelog rules.

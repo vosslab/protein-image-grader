@@ -2,6 +2,29 @@
 
 This repo handles two RUIDs for every student submission. Treat them differently.
 
+## RUID format
+
+Roosevelt University RUIDs are always **9 digits**. By rule:
+
+- Current students: 9 digits starting with `900...`
+- Older students: 9 digits starting with `960...`
+
+Anything else (8 digits, 10 digits, leading zeros, alpha characters, NetID-like
+strings) is invalid and must be rejected or quarantined. The downloader uses
+this prefix rule as a fallback when the form CSV has no explicit Student-ID
+column: a cell whose stripped value starts with `900` or `960` is treated as
+the typed Form RUID candidate. Resolution against `roster.csv` still applies
+to the candidate before any filename is written.
+
+The Google Form already validates the typed RUID for **shape** (9 digits,
+starts with `9`). What the Form **cannot** check is whether the RUID actually
+matches a student on the roster: a 9-digit number that follows the format
+rule but belongs to no real student, or to a different student than the one
+filling in the form, passes Google's check and lands in the form CSV
+unchanged. The Roster-RUID resolution in this repo exists precisely to catch
+that gap. Trust nothing about the typed RUID beyond its shape until
+`roster_matching.RosterMatcher` confirms it against `roster.csv`.
+
 ## The two RUIDs
 
 | Source | What it is | Trust |
@@ -24,6 +47,14 @@ The Form RUID is whatever the student typed at submission time. Students transpo
 
 ## How the resolution works
 
+The single resolver lives in `protein_image_grader/ruid_resolver.py` --
+one function, `resolve_form_row_to_roster_row`, plus the
+`ResolvedStudent` and `UnresolvedStudent` result dataclasses. Both the
+downloader (`download_submission_images.py`, non-interactive: quarantine
+on miss) and the grader (`student_id_protein.match_lists_and_add_student_ids`,
+interactive: raise on miss) call the same function with the same matcher
+and per-run `assigned_ruids` set. One resolver, two consumers.
+
 For each form row, the pipeline:
 
 1. Reads the Form RUID from the row's "Student ID" / "RUID" cell.
@@ -42,8 +73,8 @@ If resolution fails (no roster hit, ambiguous fuzzy match, manual reject), the r
 The Form RUID is preserved per row, but never as a filename. Specifically:
 
 - `output-protein_image_NN.csv` carries both `Student ID` (Roster RUID, authoritative) and `Form RUID` (typed value, audit only).
-- `Protein_Images/semesters/<term>/ruid_aliases.yml` records every `typed_ruid -> resolved_ruid` mapping with the match score and the date it was resolved. Re-runs read this first and skip the matcher when an alias is already on file.
-- The `WARNING OVERWRITING Student ID` log in `student_id_protein.merge_student_records` only fires when a brand-new alias is being recorded; re-runs are silent.
+- `Protein_Images/semesters/<term>/forms/quarantine.log` records every form row whose Form RUID could not be resolved against the roster, including the top roster candidates the matcher considered. No image is saved for quarantined rows; the operator fixes the roster (or the form CSV) and re-runs.
+- The `WARNING OVERWRITING Student ID` log in `student_id_protein.merge_student_records` fires whenever the grader replaces a typed Form RUID with the resolved Roster RUID.
 
 ## Why this matters
 
@@ -53,7 +84,8 @@ The Form RUID is preserved per row, but never as a filename. Specifically:
 
 ## See also
 
-- [docs/INPUT_FORMATS.md](docs/INPUT_FORMATS.md) - form CSV columns the matcher reads.
-- `protein_image_grader/roster_matching.py` - the matcher implementation.
-- `protein_image_grader/student_id_protein.py` - orchestrator that calls the matcher.
-- `protein_image_grader/download_submission_images.py` - the saver that consumes the resolved RUID.
+- [INPUT_FORMATS.md](INPUT_FORMATS.md) - form CSV columns the matcher reads.
+- `protein_image_grader/roster_matching.py` - the generic fuzzy-matching engine (`RosterMatcher` + `match_submission`).
+- `protein_image_grader/ruid_resolver.py` - one function (`resolve_form_row_to_roster_row`) that wraps `RosterMatcher` with the project-specific shape: per-run duplicate guard and triage-grade `ResolvedStudent` / `UnresolvedStudent` return.
+- `protein_image_grader/student_id_protein.py` - grading orchestrator; calls `resolve_form_row_to_roster_row` inside `match_lists_and_add_student_ids`.
+- `protein_image_grader/download_submission_images.py` - the saver that calls the resolver before writing any RUID-bearing filename.

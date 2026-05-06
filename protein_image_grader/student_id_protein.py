@@ -10,6 +10,7 @@ import rich.console
 
 # local repo modules
 import protein_image_grader.roster_matching as roster_matching
+import protein_image_grader.ruid_resolver as ruid_resolver
 
 console = rich.console.Console()
 warning_color = rich.style.Style(color="rgb(255, 187, 51)" )  # RGB for bright orange
@@ -313,21 +314,31 @@ def merge_student_records(student_entry: dict, student_id_record: dict, merge_ke
 #==============
 def match_lists_and_add_student_ids(student_ids_tree: list, student_tree: list) -> None:
 	"""
-	Match lists of student records and add student IDs to each record in student_tree.
+	Resolve every student record in `student_tree` to a roster row and
+	merge the authoritative roster fields back into each record.
 
-	Parameters
-	----------
-	student_ids_tree : list
-		List of dictionaries containing student ID records.
+	Delegates per-row resolution to
+	`ruid_resolver.resolve_form_row_to_roster_row`, sharing the same
+	function with `download_submission_images.py`. Builds an interactive
+	matcher (`auto_threshold=0.90`, `auto_gap=0.06`) so ambiguous fuzzy
+	matches prompt the operator. Tracks `assigned_ruids` per run to
+	reject two form rows resolving to the same Roster RUID.
 
-	student_tree : list
-		List of dictionaries containing student records to which IDs are to be added.
+	Args:
+		student_ids_tree: Roster records to build the matcher from.
+		student_tree: Submission records, mutated in place to carry the
+			roster's `Student ID`, `Username`, `First Name`, `Last Name`.
 
-	Returns
-	-------
-	None
+	Raises:
+		RuntimeError: On any unresolved row (no roster hit, ambiguous
+			fuzzy match below threshold, manual reject, or a duplicate
+			Roster RUID claimed earlier in this run).
 	"""
 
+	# interactive=True so the matcher prompts on ambiguous matches;
+	# auto_threshold=0.90 accepts only high-confidence matches silently.
+	# Both knobs are intentional grader policy and differ from the
+	# downloader's quarantine-on-miss behavior.
 	roster = build_roster_from_student_ids_tree(student_ids_tree)
 	matcher = roster_matching.RosterMatcher(
 		roster=roster,
@@ -336,30 +347,35 @@ def match_lists_and_add_student_ids(student_ids_tree: list, student_tree: list) 
 		auto_gap=0.06,
 		candidate_count=5,
 	)
+	assigned_ruids: set = set()
 
-	assigned_student_ids_set = set()
 	for student_entry in student_tree:
-		matched_id, reason, score = matcher.match(
-			username=student_entry.get("Username", ""),
-			first_name=student_entry.get("First Name", ""),
-			last_name=student_entry.get("Last Name", ""),
-			student_id=str(student_entry.get("Student ID", "")),
+		# Direct key access on student_entry: every record from the
+		# parsed Google Form CSV carries these four fields by contract
+		# (see file_io_protein.read_student_csv_data). A missing key is
+		# a real bug, not something to silently substitute "" for.
+		form_row = {
+			"form_ruid": str(student_entry["Student ID"]),
+			"first_name": student_entry["First Name"],
+			"last_name": student_entry["Last Name"],
+			"username": student_entry["Username"],
+		}
+		result = ruid_resolver.resolve_form_row_to_roster_row(
+			form_row, matcher, assigned_ruids,
 		)
-		if matched_id is None:
+		if isinstance(result, ruid_resolver.UnresolvedStudent):
+			if result.reason == "duplicate":
+				raise RuntimeError(
+					f"Duplicate roster match for Student ID {result.form_ruid}. "
+					"Please edit the CSV file and try again."
+				)
 			raise RuntimeError(
 				f"Could not match a student to the roster: {student_entry}. "
 				"Please edit the CSV file and try again."
 			)
 
-		if matched_id in assigned_student_ids_set:
-			raise RuntimeError(
-				f"Duplicate roster match for Student ID {matched_id}. "
-				"Please edit the CSV file and try again."
-			)
-		assigned_student_ids_set.add(matched_id)
-
-		roster_row = roster.get(matched_id, {})
-		raw = roster_row.get("_raw", {})
-		print(f"{matched_id} {roster_row.get('full_name','')} <= {reason} score={score:.3f}")
+		raw = roster[result.roster_ruid]["_raw"]
+		print(f"{result.roster_ruid} {result.full_name} <= "
+			f"{result.reason} score={result.score:.3f}")
 		merge_student_records(student_entry, raw)
 	print('\n\n')

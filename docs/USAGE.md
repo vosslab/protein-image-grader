@@ -3,7 +3,10 @@
 ## Typical flow
 - Create `Protein_Images/` structure or symlink an existing one.
 - Place canonical form CSVs in `Protein_Images/semesters/<term>/forms/`.
-- Place roster data in `Protein_Images/semesters/<term>/roster.csv`.
+- Place roster data in `Protein_Images/semesters/<term>/roster.csv`. The
+  roster is required at download time (not just grading time): every
+  saved filename uses the Roster RUID resolved from this file. See
+  [docs/RUID_POLICY.md](RUID_POLICY.md).
 - Download and review images with HTML:
 	- `source source_me.sh && python start_grading.py`
 - Grade:
@@ -30,6 +33,13 @@
 	- `Protein_Images/semesters/<term>/<image_dir>/output-protein_image_NN.yml`
 - Visual grading HTML:
 	- `Protein_Images/semesters/<term>/<image_dir>/profiles_image_NN.html`
+- Quarantine log (appended on every unresolvable row):
+	- `Protein_Images/semesters/<term>/forms/quarantine.log` lists rows
+	  whose Form RUID could not be resolved against the roster. No
+	  image is saved for these rows. Each entry includes the Form RUID,
+	  name, username, reason, score, and the top roster candidates the
+	  matcher considered. Investigate and fix the roster (or the typed
+	  RUID in the form CSV) before re-running.
 
 ## Archive behavior
 - Archive images are copied into `Protein_Images/image_bank/<term>/<image_dir>/{raw,trim}/` automatically.

@@ -17,9 +17,11 @@ import googleapiclient.errors
 
 # local repo modules
 import protein_image_grader.rmspaces
+import protein_image_grader.ruid_resolver as ruid_resolver
 import protein_image_grader.google_drive_image_utils as google_drive_image_utils
 import protein_image_grader.archive_paths as archive_paths
 import protein_image_grader.protein_images_path as protein_images_path
+import protein_image_grader.roster_matching as roster_matching
 
 pillow_heif.register_heif_opener()
 
@@ -69,6 +71,14 @@ def parse_args():
 		help="Bulk-download every canonical form CSV in the active term.")
 	args = parser.parse_args()
 	return args
+
+
+# Form CSV column names. Hardcoded because the Google Form headers are
+# fixed per semester; if a form ever changes wording, edit these here.
+COL_STUDENT_ID = 'Enter your RUID'
+COL_FIRST_NAME = 'Enter your first name'
+COL_LAST_NAME = 'Enter your last name'
+COL_USERNAME = 'Username'
 
 #============================================
 # Canonical layout for downloaded images:
@@ -452,13 +462,100 @@ def update_image_hashes(image_hashes: dict, md5hash: str, phash: str,
 	return changed
 
 #============================================
+def _row_value(row: list, idx: int | None) -> str:
+	"""
+	Read `row[idx]` defensively.
+
+	Returns '' when the column was not found in the header (`idx is None`)
+	or when the row is short (some Google Form rows omit trailing empty
+	cells). Treats a None cell as empty string.
+	"""
+	if idx is None or idx >= len(row):
+		return ""
+	return row[idx] or ""
+
+
+#============================================
+def _extract_form_ruid_from_row(row: list, header: list,
+		col_student_id_idx: int | None) -> str:
+	"""
+	Pull the typed Form RUID from one form-CSV row.
+
+	Prefers the explicit Student-ID column when the form CSV has one.
+	Falls back to the first cell that matches the Roosevelt RUID format
+	(9 digits starting with 900 or 960; see docs/RUID_POLICY.md). Older
+	form CSVs without a labeled RUID column still resolve correctly.
+
+	Returns '' when no usable candidate was found; the resolver will
+	then surface this row as UnresolvedStudent.
+	"""
+	if col_student_id_idx is not None:
+		raw = _row_value(row, col_student_id_idx).strip()
+		if raw:
+			return raw
+	for item in row:
+		if not item:
+			continue
+		stripped = item.strip()
+		if stripped.startswith('900') or stripped.startswith('960'):
+			return stripped
+	return ""
+
+
+#============================================
+def _quarantine_row(quarantine_log_path: str, unresolved) -> None:
+	"""
+	Append one quarantine record to `<csv_dir>/quarantine.log`.
+
+	The top-N roster candidates carried on `unresolved` (when present)
+	are written one per indented line below the header so the operator
+	can triage straight from the log without re-parsing the form CSV.
+
+	Args:
+		quarantine_log_path: Absolute path to the per-CSV quarantine log.
+		unresolved: An `ruid_resolver.UnresolvedStudent` instance.
+	"""
+	line = (
+		f"form_ruid={unresolved.form_ruid!r} "
+		f"name={unresolved.first_name!r} {unresolved.last_name!r} "
+		f"username={unresolved.username!r} "
+		f"reason={unresolved.reason} "
+		f"score={unresolved.score:.3f}\n"
+	)
+	for cand_ruid, cand_name, cand_score in unresolved.candidates:
+		line += f"  candidate: {cand_ruid} {cand_name} score={cand_score:.3f}\n"
+	with open(quarantine_log_path, "a", encoding="ascii") as handle:
+		handle.write(line)
+
+
+#============================================
 def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: str,
-		raw_dir: str, archive_root: str, output_html: str, image_hashes: dict, hashes_changed: list):
+		raw_dir: str, archive_root: str, output_html: str, image_hashes: dict,
+		hashes_changed: list, matcher, assigned_ruids: set):
 	"""
 	Generate an HTML file based on the CSV data.
+
+	Each row's typed Form RUID is resolved to the authoritative Roster
+	RUID via `ruid_resolver.resolve_form_row_to_roster_row(matcher, ...)`
+	before any image is saved or any filename is constructed (per
+	`docs/RUID_POLICY.md`). Rows that cannot be resolved are quarantined:
+	no image is saved, the row is appended to `<csv_dir>/quarantine.log`,
+	and the HTML page shows a placeholder so the operator sees the gap.
+	`assigned_ruids` is mutated by the resolver to detect same-run
+	duplicates across all CSVs in a `--all` run.
 	"""
 	if args.image_number == 0:
 		args.image_number = extract_number_in_range(os.path.basename(csvfile))
+
+	col_student_id_idx = roster_matching.find_column_ci(header, COL_STUDENT_ID)
+	col_first_idx = roster_matching.find_column_ci(header, COL_FIRST_NAME)
+	col_last_idx = roster_matching.find_column_ci(header, COL_LAST_NAME)
+	col_username_idx = roster_matching.find_column_ci(header, COL_USERNAME)
+
+	quarantine_log_path = os.path.join(
+		os.path.dirname(os.path.abspath(csvfile)) or ".",
+		"quarantine.log",
+	)
 
 	with open(output_html, "w") as output:
 		write_header(output, csvfile)
@@ -466,16 +563,70 @@ def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: 
 
 		for row in data_tree:
 			count += 1
-			ruid = None
 
 			if count > 1:
 				output.write('<br/><p style="page-break-before: always"><br/></p>\n')
+
+			# Resolve the Roster RUID once per row, before any image is saved.
+			form_ruid = _extract_form_ruid_from_row(row, header, col_student_id_idx)
+			first_name = _row_value(row, col_first_idx)
+			last_name = _row_value(row, col_last_idx)
+			username = _row_value(row, col_username_idx)
+
+			form_row = {
+				"form_ruid": form_ruid,
+				"first_name": first_name,
+				"last_name": last_name,
+				"username": username,
+			}
+			result = ruid_resolver.resolve_form_row_to_roster_row(
+				form_row, matcher, assigned_ruids,
+			)
+
+			if isinstance(result, ruid_resolver.UnresolvedStudent):
+				console.print(
+					f"quarantine: form_ruid={form_ruid!r} "
+					f"name={first_name!r} {last_name!r} "
+					f"reason={result.reason} score={result.score:.3f}",
+					style="bold red",
+				)
+				_quarantine_row(quarantine_log_path, result)
+				output.write(
+					"<p style='color:red'><b>QUARANTINED</b>: "
+					f"form_ruid={form_ruid} "
+					f"name={first_name} {last_name} "
+					f"reason={result.reason}</p>\n"
+				)
+				# Still emit the non-image fields so the operator can
+				# eyeball what was submitted; skip image cells entirely.
+				for i, item in enumerate(row):
+					if len(item) < 1:
+						continue
+					if item.startswith('http'):
+						continue
+					if item.startswith('900') or item.startswith('960'):
+						continue
+					output.write(
+						f"<p><b>{header[i].strip()}</b>:&nbsp; {row[i].strip()}</p>\n"
+					)
+				continue
+
+			ruid = result.roster_ruid
+			if result.form_ruid and str(ruid) != result.form_ruid.strip():
+				# Surface mismatches so the operator can spot typos at runtime.
+				console.print(
+					f"  resolved form_ruid={result.form_ruid} -> roster_ruid={ruid}"
+					f" ({result.full_name}, {result.reason} score={result.score:.3f})",
+					style="cyan",
+				)
 
 			for i, item in enumerate(row):
 				if len(item) < 1:
 					continue
 				elif item.startswith('900') or item.startswith('960'):
-					ruid = int(item)
+					# Already consumed by the resolver above; do not
+					# emit the typed RUID into the HTML page.
+					continue
 				elif item.startswith('http'):
 					img_html_tag = get_image_html_tag(
 						item, ruid, args, image_dir, raw_dir, archive_root, image_hashes, hashes_changed
@@ -586,13 +737,18 @@ def resolve_csv_paths(args) -> list:
 
 #============================================
 def process_one_csv(csvfile: str, args, image_hashes: dict,
-		hashes_changed: list, open_browser: bool) -> None:
+		hashes_changed: list, open_browser: bool,
+		matcher, assigned_ruids: set) -> None:
 	"""
 	Run the per-CSV pipeline: read CSV, resolve output dir, generate HTML.
 
 	Mutates args.image_number (resolved from the basename) and
 	args.profiles_html (per-CSV path) so generate_html sees the right
 	values; the bulk loop resets these between iterations.
+
+	`matcher` is a shared `roster_matching.RosterMatcher` constructed by
+	main(); `assigned_ruids` is the cross-CSV duplicate guard. Per-row
+	Form-RUID -> Roster-RUID resolution happens inside generate_html.
 	"""
 	header, data_tree = read_csv(csvfile, args.maxstudents)
 
@@ -601,8 +757,8 @@ def process_one_csv(csvfile: str, args, image_hashes: dict,
 	# 1-20 fallback would otherwise pick up before the real NN token.
 	args.image_number = extract_number_in_range(os.path.basename(csvfile))
 
-	# Phase 0 (start_grading.py plan): canonical CSVs imply canonical output
-	# under Protein_Images/semesters/<term>/BCHM_Prot_Img_NN_<topic>/.
+	# Canonical CSVs imply canonical output under
+	# Protein_Images/semesters/<term>/BCHM_Prot_Img_NN_<topic>/.
 	# Non-canonical CSVs require an explicit --output-dir.
 	image_dir = resolve_image_dir(csvfile, args.output_dir, args.image_number)
 	if not os.path.isdir(image_dir):
@@ -630,7 +786,8 @@ def process_one_csv(csvfile: str, args, image_hashes: dict,
 	args.profiles_html = profiles_html
 
 	generate_html(csvfile, header, data_tree, args, image_dir, raw_dir,
-		archive_root, profiles_html, image_hashes, hashes_changed)
+		archive_root, profiles_html, image_hashes, hashes_changed,
+		matcher, assigned_ruids)
 	if open_browser:
 		open_html_in_browser(profiles_html)
 
@@ -655,10 +812,22 @@ def main():
 	# Open browser only for single-CSV runs, so --all does not spawn 10 tabs.
 	open_browser = len(csv_paths) == 1
 
+	# Build the matcher once per run (the build is expensive due to
+	# roster indexing) and share `assigned_ruids` across all CSVs so a
+	# Form RUID that resolves to a Roster RUID in one CSV cannot
+	# silently re-resolve to the same student in a later CSV.
+	# Non-interactive: the downloader quarantines on miss instead of
+	# prompting.
+	term = protein_images_path.get_active_term(args.term)
+	roster = roster_matching.load_roster(
+		str(protein_images_path.get_roster_csv(term)))
+	matcher = roster_matching.RosterMatcher(roster=roster, interactive=False)
+	assigned_ruids: set = set()
+
 	for csv_path in csv_paths:
 		console.print(f"=== {csv_path}", style="bold cyan")
 		process_one_csv(str(csv_path), args, image_hashes, hashes_changed,
-			open_browser)
+			open_browser, matcher, assigned_ruids)
 
 	if hashes_changed[0]:
 		with open(image_hashes_yaml, 'w') as f:
