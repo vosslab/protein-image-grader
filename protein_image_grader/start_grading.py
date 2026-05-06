@@ -118,14 +118,6 @@ def detect_canonical_duplicates(term: str) -> dict:
 	return dups
 
 
-#============================================
-def grades_dir_for(term: str) -> pathlib.Path:
-	return protein_images_path.get_grades_dir(term)
-
-
-#============================================
-def submissions_dir_for(term: str) -> pathlib.Path:
-	return protein_images_path.get_submissions_dir(term)
 
 
 #============================================
@@ -143,6 +135,8 @@ def build_status_row(image_number: int, term: str,
 	"""
 	Build one dashboard row for the given image number. Pure function:
 	only inspects existence/non-emptiness of paths.
+
+	New layout: uses per-image folders under semesters/<term>/<image_dir>/.
 	"""
 	csv_matches = canonical_csvs.get(image_number, [])
 	if len(csv_matches) == 0:
@@ -152,18 +146,23 @@ def build_status_row(image_number: int, term: str,
 	else:
 		form_status = "OK"
 
-	submissions_dir = submissions_dir_for(term) / f"download_{image_number:02d}_raw"
-	if is_non_empty_dir(submissions_dir):
-		downloaded_status = "OK"
-	else:
+	# Resolve per-image folder once; if missing or ambiguous, every dependent
+	# status defaults to MISSING.
+	try:
+		image_dir = protein_images_path.get_term_image_dir(term, image_number)
+	except (FileNotFoundError, RuntimeError):
+		image_dir = None
+
+	if image_dir is None:
 		downloaded_status = "MISSING"
-
-	grades_dir = grades_dir_for(term)
-	graded_csv = grades_dir / f"output-protein_image_{image_number:02d}.csv"
-	graded_status = "OK" if graded_csv.is_file() else "MISSING"
-
-	bb_csv = grades_dir / f"blackboard_upload-protein_image_{image_number:02d}.csv"
-	bb_status = "OK" if bb_csv.is_file() else "MISSING"
+		graded_status = "MISSING"
+		bb_status = "MISSING"
+	else:
+		downloaded_status = "OK" if is_non_empty_dir(image_dir / "raw") else "MISSING"
+		graded_csv = image_dir / f"output-protein_image_{image_number:02d}.csv"
+		graded_status = "OK" if graded_csv.is_file() else "MISSING"
+		bb_csv = image_dir / f"blackboard_upload-protein_image_{image_number:02d}.csv"
+		bb_status = "OK" if bb_csv.is_file() else "MISSING"
 
 	emailed_status = compute_emailed_status(term, image_number, graded_status)
 
@@ -192,13 +191,16 @@ def compute_emailed_status(term: str, image_number: int,
 	or when the email log has no entry for any expected student. Otherwise
 	delegates to email_log.summarize_image with the Student IDs taken from
 	the graded YAML.
+
+	New layout: reads YAML from the per-image folder.
 	"""
 	if graded_status != "OK":
 		return "MISSING"
-	graded_yaml = (
-		grades_dir_for(term)
-		/ f"output-protein_image_{image_number:02d}.yml"
-	)
+	try:
+		image_dir = protein_images_path.get_term_image_dir(term, image_number)
+		graded_yaml = image_dir / f"output-protein_image_{image_number:02d}.yml"
+	except (FileNotFoundError, RuntimeError):
+		return "MISSING"
 	if not graded_yaml.is_file():
 		return "MISSING"
 	with open(graded_yaml, "r", encoding="utf-8") as handle:
@@ -418,19 +420,20 @@ def require_resources(term: str, step: str) -> None:
 def run_step(term: str, image_number: int, step: str) -> int:
 	"""
 	Execute one step for one image. Returns the child's exit code.
+
+	New layout: uses per-image folders under semesters/<term>/<image_dir>/.
 	"""
 	require_resources(term, step)
 	canonical_csv = resolve_canonical_csv(term, image_number)
 
 	if step == "grade":
 		# Download is non-interactive, so auto-run it when the canonical
-		# download dir for this image is empty/missing. Existing non-empty
+		# raw/ subdir for this image is empty/missing. Existing non-empty
 		# downloads are kept as-is (no overwrite prompt) so re-runs do not
 		# re-fetch hundreds of images.
-		download_dir = (
-			submissions_dir_for(term) / f"download_{image_number:02d}_raw"
-		)
-		if not is_non_empty_dir(download_dir):
+		image_dir = protein_images_path.get_term_image_dir(term, image_number)
+		raw_dir = image_dir / "raw"
+		if not is_non_empty_dir(raw_dir):
 			download_command = build_download_command(canonical_csv)
 			download_command_string = " ".join(download_command)
 			print(f"+ {download_command_string}")
@@ -438,10 +441,7 @@ def run_step(term: str, image_number: int, step: str) -> int:
 			if download_result.returncode != 0:
 				return download_result.returncode
 		command = build_grade_command(image_number, term)
-		graded_csv = (
-			grades_dir_for(term)
-			/ f"output-protein_image_{image_number:02d}.csv"
-		)
+		graded_csv = image_dir / f"output-protein_image_{image_number:02d}.csv"
 		if graded_csv.is_file():
 			ok = confirm_overwrite(
 				f"Existing grade output found:\n  {graded_csv}\n"
@@ -452,10 +452,8 @@ def run_step(term: str, image_number: int, step: str) -> int:
 				return 1
 	elif step == "regrade":
 		command = build_grade_command(image_number, term)
-		graded_csv = (
-			grades_dir_for(term)
-			/ f"output-protein_image_{image_number:02d}.csv"
-		)
+		image_dir = protein_images_path.get_term_image_dir(term, image_number)
+		graded_csv = image_dir / f"output-protein_image_{image_number:02d}.csv"
 		if graded_csv.is_file():
 			ok = confirm_overwrite(
 				f"Existing grade output:\n  {graded_csv}\n"
@@ -468,10 +466,8 @@ def run_step(term: str, image_number: int, step: str) -> int:
 		# Idempotency comes from email_log.yml inside send_feedback_email.py;
 		# the orchestrator never opts in to -e/--send-email, so this run
 		# always defaults to dry-run.
-		graded_yaml = (
-			grades_dir_for(term)
-			/ f"output-protein_image_{image_number:02d}.yml"
-		)
+		image_dir = protein_images_path.get_term_image_dir(term, image_number)
+		graded_yaml = image_dir / f"output-protein_image_{image_number:02d}.yml"
 		if not graded_yaml.is_file():
 			raise FileNotFoundError(
 				f"Graded YAML required for email step: {graded_yaml}"

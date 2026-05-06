@@ -49,12 +49,15 @@ def parse_args():
 	parser.add_argument('-r', '--rotate', dest='rotate', action='store_true')
 	parser.add_argument('--no-rotate', dest='rotate', action='store_false')
 	parser.set_defaults(rotate=False)
-	# Default is None so main() can infer the canonical
-	# Protein_Images/semesters/<term>/submissions/download_NN_raw/ path from
-	# a canonical input CSV. An explicit override is honored verbatim.
+	# Default is None so main() can infer the canonical per-image folder
+	# (Protein_Images/semesters/<term>/BCHM_Prot_Img_NN_<topic>/) from a
+	# canonical input CSV. An explicit override is honored verbatim.
 	parser.add_argument('-o', '--output-dir', dest='output_dir', type=str,
-		help="Output directory for downloads and HTML (overrides canonical inference)",
+		help="Output directory for downloads and HTML (disables archive sync by default)",
 		default=None)
+	parser.add_argument('--archive-anyway', dest='archive_anyway', action='store_true',
+		help="Re-enable archive sync even when --output-dir is provided",
+		default=False)
 	parser.add_argument('-p', '--profiles-html', dest='profiles_html', type=str,
 		help="Output HTML file name", default=None)
 	parser.add_argument('--image-number', dest='image_number', default=0,
@@ -68,9 +71,9 @@ def parse_args():
 	return args
 
 #============================================
-# Legacy build_image_dir (DOWNLOAD_NN_year_YYYY/) was removed in Phase 0
-# of the start_grading.py plan; the canonical layout lives under
-# Protein_Images/semesters/<term>/submissions/download_NN_raw/.
+# Canonical layout for downloaded images:
+#   Protein_Images/semesters/<term>/BCHM_Prot_Img_NN_<topic>/raw/
+#   Protein_Images/semesters/<term>/BCHM_Prot_Img_NN_<topic>/trim/
 
 #============================================
 # regex: BCHM_Prot_Img_NN-<anything>.csv where NN is two digits 01-20
@@ -96,12 +99,12 @@ def extract_image_number_from_csv_basename(basename: str) -> int:
 #============================================
 def infer_canonical_output_dir(csv_path: str) -> pathlib.Path:
 	"""
-	Infer the canonical submissions output dir from a canonical CSV path.
+	Infer the canonical image output dir from a canonical CSV path.
 
 	The CSV must live under
 		<repo>/Protein_Images/semesters/<term>/forms/BCHM_Prot_Img_NN-*.csv
 	in which case this returns
-		<repo>/Protein_Images/semesters/<term>/submissions/download_NN_raw
+		<repo>/Protein_Images/semesters/<term>/BCHM_Prot_Img_NN_<topic>
 
 	Returns None when the CSV path is non-canonical. Pure function except
 	for resolving the path (no directories are created).
@@ -119,8 +122,9 @@ def infer_canonical_output_dir(csv_path: str) -> pathlib.Path:
 		return None
 	term = parts[-3]
 	image_number = extract_image_number_from_csv_basename(csv_p.name)
-	submissions_dir = protein_images_path.get_submissions_dir(term)
-	return submissions_dir / f"download_{image_number:02d}_raw"
+	# New layout: return the per-image directory (caller will add /raw or /trim)
+	image_dir = protein_images_path.get_term_image_dir(term, image_number)
+	return image_dir
 
 
 #============================================
@@ -129,11 +133,11 @@ def resolve_image_dir(csvfile: str, output_dir_override: str | None,
 	"""
 	Resolve where downloaded images for this run should land.
 
-	Rules (Phase 0 of the start_grading.py plan):
+	Rules:
 	- If output_dir_override is given, honor it verbatim (no rewrites).
-	- Else, infer the canonical
-	  Protein_Images/semesters/<term>/submissions/download_NN_raw/ from the
-	  CSV path. If the CSV is not canonical, raise a clear error.
+	- Else, infer the canonical per-image directory from the CSV path.
+	  The CSV must be in Protein_Images/semesters/<term>/forms/ and match
+	  the provided image_number. If the CSV is not canonical, raise a clear error.
 	"""
 	if output_dir_override is not None:
 		return output_dir_override
@@ -146,27 +150,32 @@ def resolve_image_dir(csvfile: str, output_dir_override: str | None,
 			"--output-dir explicitly."
 		)
 		raise ValueError(message)
-	# image_number is checked against the inferred dir for safety; mismatch
-	# means the caller passed --image-number that disagrees with the CSV.
-	expected_suffix = f"download_{image_number:02d}_raw"
-	if canonical.name != expected_suffix:
+	# Verify that the inferred image_number matches the expected one.
+	# Extract the number from the CSV to compare.
+	csv_basename = pathlib.Path(csvfile).name
+	csv_image_number = extract_image_number_from_csv_basename(csv_basename)
+	if csv_image_number != image_number:
 		raise ValueError(
-			f"Image number {image_number} disagrees with canonical CSV path"
-			f" (expected dir suffix {expected_suffix}, got {canonical.name})"
+			f"Image number {image_number} disagrees with CSV basename {csv_basename}"
+			f" (CSV indicates image {csv_image_number:02d})"
 		)
 	return str(canonical)
 
 #============================================
 def get_image_html_tag(image_url: str, ruid: int, args, image_dir: str,
-		archive_dir: str, image_hashes: dict, hashes_changed: list) -> str:
+		raw_dir: str, archive_root: str, image_hashes: dict, hashes_changed: list) -> str:
 	"""
-	Download image from Google Drive and return an HTML tag linking to the local file.
+	Download image from Google Drive, save to raw/trim dirs, archive, hash, and return HTML tag.
 
 	Args:
 		image_url: Google Drive image URL
 		ruid: Record ID for naming
 		args: Parsed arguments
-		image_dir: Output image directory
+		image_dir: Per-image working directory
+		raw_dir: raw/ subdirectory path
+		archive_root: Archive root for the image (image_bank/<term>/<image_dir>)
+		image_hashes: Hash dict to update
+		hashes_changed: Mutable list to track changes
 
 	Returns:
 		str: HTML <img> tag(s) for the image
@@ -177,27 +186,43 @@ def get_image_html_tag(image_url: str, ruid: int, args, image_dir: str,
 		return ''
 
 	filename = format_filename(original_filename, ruid, args)
-	filepath = os.path.abspath(os.path.join(image_dir, filename))
-	if not os.path.exists(filepath):
-		was_saved = download_and_save_image(image_data, filepath)
+	raw_path = os.path.abspath(os.path.join(raw_dir, filename))
+	if not os.path.exists(raw_path):
+		was_saved = download_and_save_image(image_data, raw_path)
 		if not was_saved:
 			return ''
 	else:
 		console.print(f"file exists: {filename}", style="dim yellow")
 
-	archive_path = archive_image_if_needed(filepath, archive_dir)
-	if archive_path and image_hashes is not None:
-		with open(archive_path, 'rb') as f:
-			md5hash, phash = google_drive_image_utils.get_hash_data(f)
-		hashes_changed[0] = update_image_hashes(
-			image_hashes, md5hash, phash, archive_path
-		) or hashes_changed[0]
+	# Archive the raw image if archiving is enabled
+	if archive_root and image_hashes is not None:
+		archive_path = archive_image_if_needed(raw_path, os.path.join(archive_root, "raw"))
+		if archive_path:
+			with open(archive_path, 'rb') as f:
+				md5hash, phash = google_drive_image_utils.get_hash_data(f)
+			hashes_changed[0] = update_image_hashes(
+				image_hashes, md5hash, phash, archive_path
+			) or hashes_changed[0]
 
 	trim_path = None
 	if args.trim:
-		trim_path = trim_and_save_image(filepath, args.rotate)
+		trim_dir = os.path.join(image_dir, "trim")
+		if not os.path.isdir(trim_dir):
+			os.makedirs(trim_dir)
+		trim_path = trim_and_save_image(raw_path, trim_dir, args.rotate)
+		if trim_path is None:
+			trim_path = ""
+		# Archive the trim image if archiving is enabled
+		if archive_root and image_hashes is not None and trim_path:
+			archive_path = archive_image_if_needed(trim_path, os.path.join(archive_root, "trim"))
+			if archive_path:
+				with open(archive_path, 'rb') as f:
+					md5hash, phash = google_drive_image_utils.get_hash_data(f)
+				hashes_changed[0] = update_image_hashes(
+					image_hashes, md5hash, phash, archive_path
+				) or hashes_changed[0]
 
-	html_tag = f"<img border='3' src='file://{filepath}' height='250' />"
+	html_tag = f"<img border='3' src='file://{raw_path}' height='250' />"
 	if args.trim and os.path.isfile(trim_path):
 		html_tag += f"<img border='3' src='file://{trim_path}' height='350' />"
 
@@ -289,12 +314,13 @@ def archive_image_if_needed(filepath: str, archive_dir: str) -> str:
 	return archive_path
 
 #============================================
-def trim_and_save_image(filepath: str, rotate: bool=False) -> str:
+def trim_and_save_image(filepath: str, trim_dir: str, rotate: bool=False) -> str:
 	"""
-	Trim borders and optionally rotate the image, then save.
+	Trim borders and optionally rotate the image, then save to trim_dir.
 
 	Args:
 		filepath: Original image path
+		trim_dir: Directory to save the trimmed image
 		rotate: Whether to rotate tall images
 
 	Returns:
@@ -306,7 +332,10 @@ def trim_and_save_image(filepath: str, rotate: bool=False) -> str:
 		trimmed_image = google_drive_image_utils.rotate_if_tall(trimmed_image)
 	if trimmed_image.mode != 'RGB':
 		trimmed_image = trimmed_image.convert('RGB')
-	trim_path = os.path.splitext(filepath)[0] + '-trim.jpg'
+	basename = os.path.basename(filepath)
+	basename_no_ext = os.path.splitext(basename)[0]
+	trim_filename = f"{basename_no_ext}-trim.jpg"
+	trim_path = os.path.join(trim_dir, trim_filename)
 	trimmed_image.save(trim_path)
 	console.print(f"saved {os.path.basename(trim_path)}", style="bold green")
 	return trim_path
@@ -386,38 +415,6 @@ def extract_number_in_range(s: str) -> int:
 			return num
 	raise ValueError(f"No number in range 1-20 found in string: {s}")
 
-#============================================
-def get_term_from_month(month: int) -> str:
-	"""
-	Map month to term label.
-	"""
-	current_year = time.localtime().tm_year
-	term_label = archive_paths.make_term_label_from_month(current_year, month)
-	return term_label
-
-#============================================
-def get_archive_assignment_dir(image_number: int, spec_dir: str) -> str:
-	"""
-	Build the archive assignment directory path.
-	"""
-	current_year = time.localtime().tm_year
-	current_term = archive_paths.make_term_label_from_month(
-		current_year, time.localtime().tm_mon
-	)
-
-	assignment_name = None
-	spec_yaml = os.path.join(spec_dir, f"protein_image_{image_number:02d}.yml")
-	if os.path.isfile(spec_yaml):
-		with open(spec_yaml, 'r') as f:
-			config = yaml.safe_load(f)
-			assignment_name = config.get('assignment name', None)
-
-	repo_root = archive_paths.get_repo_root()
-	archive_dir = archive_paths.make_archive_assignment_dir(
-		image_number, assignment_name, current_term, repo_root
-	)
-
-	return str(archive_dir)
 
 #============================================
 def load_image_hashes(image_hashes_yaml: str) -> dict:
@@ -456,7 +453,7 @@ def update_image_hashes(image_hashes: dict, md5hash: str, phash: str,
 
 #============================================
 def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: str,
-		archive_dir: str, output_html: str, image_hashes: dict, hashes_changed: list):
+		raw_dir: str, archive_root: str, output_html: str, image_hashes: dict, hashes_changed: list):
 	"""
 	Generate an HTML file based on the CSV data.
 	"""
@@ -481,7 +478,7 @@ def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: 
 					ruid = int(item)
 				elif item.startswith('http'):
 					img_html_tag = get_image_html_tag(
-						item, ruid, args, image_dir, archive_dir, image_hashes, hashes_changed
+						item, ruid, args, image_dir, raw_dir, archive_root, image_hashes, hashes_changed
 					)
 					output.write(f"{img_html_tag}\n")
 				else:
@@ -605,7 +602,7 @@ def process_one_csv(csvfile: str, args, image_hashes: dict,
 	args.image_number = extract_number_in_range(os.path.basename(csvfile))
 
 	# Phase 0 (start_grading.py plan): canonical CSVs imply canonical output
-	# under Protein_Images/semesters/<term>/submissions/download_NN_raw/.
+	# under Protein_Images/semesters/<term>/BCHM_Prot_Img_NN_<topic>/.
 	# Non-canonical CSVs require an explicit --output-dir.
 	image_dir = resolve_image_dir(csvfile, args.output_dir, args.image_number)
 	if not os.path.isdir(image_dir):
@@ -614,17 +611,26 @@ def process_one_csv(csvfile: str, args, image_hashes: dict,
 		f"  image {args.image_number:02d} -> {image_dir}",
 		style="green")
 
-	# profiles_html lands in the parent of image_dir so the canonical layout
-	# keeps each image's profile page next to its download_NN_raw folder.
-	profiles_parent = os.path.dirname(image_dir)
+	# Set up raw_dir (always under image_dir for canonical layout).
+	raw_dir = os.path.join(image_dir, "raw")
+	if not os.path.isdir(raw_dir):
+		os.makedirs(raw_dir)
+
+	# Archive is disabled by default when --output-dir is used; --archive-anyway
+	# re-enables it. Without --output-dir, archive sync is always on.
+	archive_root = None
+	if (args.output_dir is None) or args.archive_anyway:
+		term = protein_images_path.get_active_term(args.term)
+		archive_root = str(archive_paths.make_archive_assignment_dir(
+			term, pathlib.Path(image_dir).name))
+
+	# profiles_html lands in the per-image folder per canonical layout.
 	profiles_html = os.path.join(
-		profiles_parent, f"profiles_image_{args.image_number:02d}.html")
+		image_dir, f"profiles_image_{args.image_number:02d}.html")
 	args.profiles_html = profiles_html
 
-	archive_dir = get_archive_assignment_dir(args.image_number, "spec_yaml_files")
-
-	generate_html(csvfile, header, data_tree, args, image_dir, archive_dir,
-		profiles_html, image_hashes, hashes_changed)
+	generate_html(csvfile, header, data_tree, args, image_dir, raw_dir,
+		archive_root, profiles_html, image_hashes, hashes_changed)
 	if open_browser:
 		open_html_in_browser(profiles_html)
 
@@ -642,7 +648,7 @@ def main():
 	if args.output_dir is not None and len(csv_paths) > 1:
 		raise ValueError("--output-dir cannot be used with --all (would collide).")
 
-	image_hashes_yaml = str(archive_paths.get_image_hashes_path())
+	image_hashes_yaml = str(protein_images_path.get_image_hashes_yaml())
 	image_hashes = load_image_hashes(image_hashes_yaml)
 	hashes_changed = [False]
 

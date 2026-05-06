@@ -11,6 +11,7 @@ import rich.style
 # local repo modules
 import protein_image_grader.student_id_protein as student_id_protein
 import protein_image_grader.archive_paths as archive_paths
+import protein_image_grader.protein_images_path as protein_images_path
 
 console = rich.console.Console()
 warning_color = rich.style.Style(color="rgb(255, 187, 51)")  # RGB for bright orange
@@ -89,7 +90,7 @@ def filter_duplicate_group_by_ruid(dup_image_filenames: set) -> set:
 	return filtered_group
 
 #============================================
-def load_image_hashes(file_path: str = 'image_hashes.yml') -> dict:
+def load_image_hashes(file_path: str = None) -> dict:
 	"""Load image hashes from a YAML file."""
 	"""
 	(!!!) important note:
@@ -105,6 +106,9 @@ def load_image_hashes(file_path: str = 'image_hashes.yml') -> dict:
 				value: a LIST of filenames to compare
 	so local maintains a list, whereas a image_hash
 	"""
+
+	if file_path is None:
+		file_path = str(protein_images_path.get_image_hashes_yaml())
 
 	if not os.path.isfile(file_path):
 		console.print(f"WARNING: image hashes file not found: {file_path}", style=warning_color)

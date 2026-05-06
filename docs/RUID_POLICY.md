@@ -16,9 +16,10 @@ The Form RUID is whatever the student typed at submission time. Students transpo
 **When writing files to disk that include an RUID in the filename, always use the Roster RUID, never the Form RUID.** This applies to:
 
 - `Protein_Images/semesters/<term>/<image_dir>/raw/<RUID>-protein NN-...`
+- `Protein_Images/semesters/<term>/<image_dir>/trim/<RUID>-protein NN-...-trim.jpg`
 - `Protein_Images/image_bank/<term>/<image_dir>/{raw,trim}/<RUID>-protein NN-...`
-- `Protein_Images/semesters/<term>/grades/output-protein_image_NN.csv` (Student ID column)
-- `Protein_Images/semesters/<term>/grades/blackboard_upload-protein_image_NN.csv`
+- `Protein_Images/semesters/<term>/<image_dir>/output-protein_image_NN.csv` (Student ID column)
+- `Protein_Images/semesters/<term>/<image_dir>/blackboard_upload-protein_image_NN.csv`
 - HTML profile pages (`profiles_image_NN.html`) shown during review.
 
 ## How the resolution works

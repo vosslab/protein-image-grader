@@ -1,10 +1,10 @@
 """
-Phase 0 tests for download_submission_images.py canonical output dir.
+Tests for download_submission_images.py canonical output dir (unified image storage).
 
 These tests pin three rules:
 - A canonical CSV path
   (Protein_Images/semesters/<term>/forms/BCHM_Prot_Img_NN-*.csv) implies
-  the canonical submissions/download_NN_raw output dir.
+  the canonical per-image directory (BCHM_Prot_Img_NN_<topic>).
 - An explicit --output-dir override wins verbatim, with no inference.
 - A non-canonical CSV path with no override is a hard error, not a
   silent fallback to data/runs.
@@ -59,11 +59,12 @@ def test_extract_image_number_rejects_non_canonical():
 
 def test_infer_canonical_output_dir_canonical(tmp_path, monkeypatch):
 	_install_fake_repo_root(monkeypatch, tmp_path)
-	csv_path = _make_canonical_csv(tmp_path, "spring_2026", 4)
+	csv_path = _make_canonical_csv(tmp_path, "spring_2026", 4, "White_Background")
 	out = dsi.infer_canonical_output_dir(str(csv_path))
+	# New layout: per-image directory derived from the form CSV basename
 	expected = (
 		tmp_path / pip.PROTEIN_IMAGES_NAME / pip.SEMESTERS_SUBDIR
-		/ "spring_2026" / pip.SUBMISSIONS_SUBDIR / "download_04_raw"
+		/ "spring_2026" / "BCHM_Prot_Img_04_White_Background"
 	)
 	assert out == expected
 
@@ -78,9 +79,10 @@ def test_infer_canonical_output_dir_non_canonical_returns_none(tmp_path):
 
 def test_resolve_image_dir_canonical_default(tmp_path, monkeypatch):
 	_install_fake_repo_root(monkeypatch, tmp_path)
-	csv_path = _make_canonical_csv(tmp_path, "spring_2026", 4)
+	csv_path = _make_canonical_csv(tmp_path, "spring_2026", 4, "White_Background")
 	resolved = dsi.resolve_image_dir(str(csv_path), None, 4)
-	assert resolved.endswith("submissions/download_04_raw")
+	# New layout: per-image directory with the derived name
+	assert resolved.endswith("BCHM_Prot_Img_04_White_Background")
 
 
 def test_resolve_image_dir_explicit_override_wins(tmp_path, monkeypatch):

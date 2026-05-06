@@ -17,9 +17,10 @@ for cheat detection.
 
 `<image_dir>` is derived from the form CSV basename, e.g., `BCHM_Prot_Img_04_Active_Site`.
 
-Canonical hash paths are repo-relative POSIX-style paths:
-- `Protein_Images/image_bank/spring_2026/BCHM_Prot_Img_04_Active_Site/raw/file.png`
-- `Protein_Images/image_bank/spring_2026/BCHM_Prot_Img_04_Active_Site/trim/file-trim.jpg`
+Canonical hash paths are POSIX-style and relative to `Protein_Images/` (the
+`Protein_Images/` prefix is stripped by `normalize_hash_path` before writing):
+- `image_bank/spring_2026/BCHM_Prot_Img_04_Active_Site/raw/file.png`
+- `image_bank/spring_2026/BCHM_Prot_Img_04_Active_Site/trim/file-trim.jpg`
 
 ## Archive path utility
 - `protein_image_grader/archive_paths.py` and `protein_image_grader/protein_images_path.py` centralize archive path rules.
@@ -35,6 +36,7 @@ Canonical hash paths are repo-relative POSIX-style paths:
 - Each raw image is copied into the canonical archive folder (`Protein_Images/image_bank/<term>/<image_dir>/raw/`).
 - If `--trim` is used, each trimmed image is copied to `Protein_Images/image_bank/<term>/<image_dir>/trim/`.
 - The hash database is updated with new hashes pointing to the archive copies.
+- Archive sync is disabled when `--output-dir` is provided. Pass `--archive-anyway` alongside `--output-dir` to keep archive sync on; the archive folder name still resolves from the canonical semester layout, not the override path.
 
 ## Hash database format
 `image_hashes.yml` at the repo root contains two dictionaries:
@@ -81,10 +83,10 @@ Hashes are computed in `google_drive_image_utils.py`:
 
 ## Archive migration
 - To migrate a flat `image_bank/` structure to term-organized layout:
-	- `source source_me.sh && python tools/migrate_image_bank_to_terms.py`
+	- `source source_me.sh && python local_migrations/migrate_image_bank_to_terms.py`
 - Dry-run mode (default) shows what would be moved.
 - To perform the actual migration:
-	- `source source_me.sh && python tools/migrate_image_bank_to_terms.py --apply`
+	- `source source_me.sh && python local_migrations/migrate_image_bank_to_terms.py --apply`
 - Files are moved to `Protein_Images/image_bank/<term>/<assignment>/{raw,trim}/`.
 - Existing identical files (by MD5) are skipped.
 - Different files at the same destination path trigger an error and stop the migration.

@@ -2,7 +2,6 @@
 import os
 import glob
 import time
-import shutil
 import fnmatch
 import argparse
 from types import MappingProxyType
@@ -21,7 +20,6 @@ import protein_image_grader.read_save_images as read_save_images
 import protein_image_grader.student_id_protein as student_id_protein
 import protein_image_grader.timestamp_tools as timestamp_tools
 import protein_image_grader.download_submission_images as download_submission_images
-import protein_image_grader.archive_paths as archive_paths
 import protein_image_grader.protein_images_path as protein_images_path
 
 console = rich.console.Console()
@@ -383,71 +381,41 @@ def parse_and_prepare() -> dict:
 
 	# Resolve canonical term-scoped paths via the helper.
 	term = protein_images_path.get_active_term(args.term)
-	submissions_dir = protein_images_path.get_submissions_dir(term)
-	grades_dir = protein_images_path.get_grades_dir(term)
 	forms_dir = protein_images_path.get_forms_dir(term)
 	roster_csv = str(protein_images_path.get_roster_csv(term))
-
-	folder = str(submissions_dir / f"image_{image_number:02d}")
-	if not os.path.isdir(folder):
-		os.makedirs(folder)
-
-	image_folder = str(submissions_dir / f"download_{image_number:02d}_raw")
-	if not os.path.isdir(image_folder):
-		os.makedirs(image_folder)
-
-	if not os.path.isdir(grades_dir):
-		os.makedirs(grades_dir)
-
-	repo_root = archive_paths.get_repo_root()
-	archive_root = str(repo_root / "archive")
-	archive_assignment_dir = download_submission_images.get_archive_assignment_dir(
-		image_number, spec_dir
-	)
-	archive_images_dir = os.path.dirname(archive_assignment_dir)
-	archive_session_dir = os.path.dirname(archive_images_dir)
-	if not os.path.isdir(archive_assignment_dir):
-		os.makedirs(archive_assignment_dir)
+	image_dir = protein_images_path.get_term_image_dir(term, image_number)
+	raw_dir = image_dir / "raw"
+	if not raw_dir.is_dir():
+		raw_dir.mkdir(parents=True, exist_ok=True)
 
 	# Construct file paths
-	config_yaml = os.path.join(spec_dir, f"protein_image_{image_number:02d}.yml")
+	config_yaml = str(protein_images_path.get_image_spec_yaml(term, image_number))
 	csv_pattern = f"BCHM_Prot_Img_{image_number:02d}-*.csv"
-	# Look in the per-image work folder first; if not present, look in the
-	# canonical forms/ folder for this term and copy in.
-	input_csv_glob = glob.glob(os.path.join(folder, csv_pattern))
-	if len(input_csv_glob) < 1:
-		candidates = sorted(glob.glob(os.path.join(str(forms_dir), csv_pattern)))
-		if len(candidates) < 1:
-			raise ValueError(
-				f"Input CSV not found in {forms_dir} matching {csv_pattern}"
-			)
-		if len(candidates) > 1:
-			raise ValueError(f"Multiple input CSV files found: {candidates}")
-		source_csv = candidates[0]
-		target_csv = os.path.join(folder, os.path.basename(source_csv))
-		shutil.copy2(source_csv, target_csv)
-		input_csv = target_csv
-	else:
-		input_csv = input_csv_glob.pop()
-	output_csv = str(grades_dir / f"output-protein_image_{image_number:02d}.csv")
-	output_yml = str(grades_dir / f"output-protein_image_{image_number:02d}.yml")
+	# Look in canonical forms/ folder for this term.
+	candidates = sorted(glob.glob(os.path.join(str(forms_dir), csv_pattern)))
+	if len(candidates) < 1:
+		raise ValueError(
+			f"Input CSV not found in {forms_dir} matching {csv_pattern}"
+		)
+	if len(candidates) > 1:
+		raise ValueError(f"Multiple input CSV files found: {candidates}")
+	input_csv = candidates[0]
+
+	output_csv = str(image_dir / f"output-protein_image_{image_number:02d}.csv")
+	output_yml = str(image_dir / f"output-protein_image_{image_number:02d}.yml")
 	grades_csv = str(
-		grades_dir / f"blackboard_upload-protein_image_{image_number:02d}.csv"
+		image_dir / f"blackboard_upload-protein_image_{image_number:02d}.csv"
 	)
 	student_ids_csv = roster_csv
-	image_hashes_yaml = str(archive_paths.get_image_hashes_path(repo_root))
+	image_hashes_yaml = str(protein_images_path.get_image_hashes_yaml())
 
 	params_dict = {
 		"args": args,
 		"image_number": image_number,
 		"term": term,
 		"spec_dir": spec_dir,
-		"folder": folder,
-		"image_folder": image_folder,
-		"archive_root": archive_root,
-		"archive_session_dir": archive_session_dir,
-		"archive_images_dir": archive_images_dir,
-		"archive_assignment_dir": archive_assignment_dir,
+		"image_dir": str(image_dir),
+		"raw_dir": str(raw_dir),
 		"config_yaml": config_yaml,
 		"input_csv": input_csv,
 		"output_csv": output_csv,

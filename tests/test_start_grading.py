@@ -27,13 +27,12 @@ def _install_fake_repo_root(monkeypatch, repo_root):
 def _make_term_skeleton(repo_root: pathlib.Path, term: str,
 		with_roster: bool = True, with_bb_ids: bool = True,
 		with_forms: bool = True) -> dict:
-	# Build Protein_Images/semesters/<term>/{forms,submissions,grades}.
+	# Build Protein_Images/semesters/<term> with unified image storage layout.
+	# No more separate submissions/ or grades/ dirs; all per-image folders now.
 	term_dir = repo_root / pip.PROTEIN_IMAGES_NAME / pip.SEMESTERS_SUBDIR / term
 	term_dir.mkdir(parents=True)
 	if with_forms:
 		(term_dir / pip.FORMS_SUBDIR).mkdir()
-	(term_dir / pip.SUBMISSIONS_SUBDIR).mkdir()
-	(term_dir / pip.GRADES_SUBDIR).mkdir()
 	if with_roster:
 		(term_dir / pip.ROSTER_FILENAME).write_text("", encoding="ascii")
 	if with_bb_ids:
@@ -133,18 +132,21 @@ def test_status_row_for_complete_image(tmp_path, monkeypatch):
 	_install_fake_repo_root(monkeypatch, tmp_path)
 	_make_term_skeleton(tmp_path, "spring_2026")
 	_drop_canonical_csv(tmp_path, "spring_2026", 1)
-	# Fake submissions and grade outputs for image 01.
-	subs = pip.get_submissions_dir("spring_2026") / "download_01_raw"
-	subs.mkdir(parents=True)
-	(subs / "fake.jpg").write_text("", encoding="ascii")
-	grades = pip.get_grades_dir("spring_2026")
-	(grades / "output-protein_image_01.csv").write_text("", encoding="ascii")
-	(grades / "blackboard_upload-protein_image_01.csv").write_text(
+	# New layout: per-image folder with raw/ and output files
+	image_dir = pip.get_term_image_dir("spring_2026", 1)
+	image_dir.mkdir(parents=True, exist_ok=True)
+	# Create raw/ subdirectory with a fake image
+	raw_dir = image_dir / "raw"
+	raw_dir.mkdir(exist_ok=True)
+	(raw_dir / "fake.jpg").write_text("", encoding="ascii")
+	# Create output files in the per-image folder
+	(image_dir / "output-protein_image_01.csv").write_text("", encoding="ascii")
+	(image_dir / "blackboard_upload-protein_image_01.csv").write_text(
 		"", encoding="ascii")
 	# Graded YAML + email log marking the only expected student as sent.
 	import yaml as _yaml
 	import protein_image_grader.email_log as _email_log
-	graded_yaml = grades / "output-protein_image_01.yml"
+	graded_yaml = image_dir / "output-protein_image_01.yml"
 	graded_yaml.write_text(_yaml.safe_dump([{
 		"Student ID": "900000001",
 		"Username": "alice",

@@ -19,6 +19,9 @@ Language Model guide to Neil pytest usage.
 * One or two assertions per function is enough.
 * Five assertions for a simple function is overkill.
 * Do not test trivial behavior or thin wrappers around standard library calls.
+* Do not create permanent pytest files for temporary or scratch code.
+* Do not write tests for `_temp.*` files, ad-hoc debugging scripts, or any code intended to be deleted shortly after use.
+* Tests in `tests/` are reserved for code that will remain in the repo.
 
 ## Good tests
 

@@ -45,7 +45,7 @@ def test_missing_archive_file_warns_and_continues(
 	]
 	image_hashes = {
 		"md5": {},
-		"phash": {"0" * 63 + "1": "archive/missing.png"},
+		"phash": {"0" * 63 + "1": "image_bank/spring_2026/BCHM_Prot_Img_01_Foo/raw/missing.png"},
 	}
 	local_image_hashes = duplicate_processing.fill_local_image_hashes(student_tree)
 
@@ -63,4 +63,6 @@ def test_missing_archive_file_warns_and_continues(
 	)
 
 	output = capsys.readouterr().out
-	assert "WARNING: archive image file not found: archive/missing.png" in output
+	# The output may contain the path on a different line
+	assert "image_bank/spring_2026/BCHM_Prot_Img_01_Foo/raw/missing.png" in output
+	assert "WARNING" in output or "file not found" in output

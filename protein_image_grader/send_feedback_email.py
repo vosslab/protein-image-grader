@@ -292,11 +292,10 @@ def main():
 		config = yaml.safe_load(f)
 
 	if args.term is not None:
-		# Canonical mode: resolve graded YAML under
-		# Protein_Images/semesters/<term>/grades/ and update the per-term
-		# email log. send_feedback_for_image owns idempotency.
-		grades_dir = protein_images_path.get_grades_dir(args.term)
-		input_yml = grades_dir / f"output-protein_image_{image_number:02d}.yml"
+		# Canonical mode: resolve graded YAML in per-image folder and update
+		# the per-term email log. send_feedback_for_image owns idempotency.
+		image_dir = protein_images_path.get_term_image_dir(args.term, image_number)
+		input_yml = image_dir / f"output-protein_image_{image_number:02d}.yml"
 		if not input_yml.is_file():
 			raise FileNotFoundError(
 				f"Graded YAML not found for image {image_number:02d}"

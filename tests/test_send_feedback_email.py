@@ -22,9 +22,12 @@ def _install_fake_repo_root(monkeypatch, repo_root: pathlib.Path) -> None:
 
 
 def _make_term_skeleton(repo_root: pathlib.Path, term: str) -> pathlib.Path:
+	# Create minimal structure for testing: term root + one image directory
 	term_dir = repo_root / pip.PROTEIN_IMAGES_NAME / pip.SEMESTERS_SUBDIR / term
 	term_dir.mkdir(parents=True)
-	(term_dir / pip.GRADES_SUBDIR).mkdir()
+	# Create a minimal per-image folder for tests
+	image_dir = term_dir / "BCHM_Prot_Img_01_Test"
+	image_dir.mkdir()
 	return term_dir
 
 
@@ -136,10 +139,11 @@ def test_dry_run_does_not_call_send_func(tmp_path, monkeypatch):
 def test_canonical_path_resolves_under_term(tmp_path, monkeypatch):
 	_install_fake_repo_root(monkeypatch, tmp_path)
 	_make_term_skeleton(tmp_path, "spring_2026")
+	# In the new layout, output files live in the per-image folder
 	expected = (tmp_path / pip.PROTEIN_IMAGES_NAME / pip.SEMESTERS_SUBDIR
-		/ "spring_2026" / pip.GRADES_SUBDIR
+		/ "spring_2026" / "BCHM_Prot_Img_01_Test"
 		/ "output-protein_image_01.yml")
-	# The canonical mode in main() reads exactly this path; assert the
-	# helper returns the same shape so we have one source of truth.
-	assert pip.get_grades_dir("spring_2026") / "output-protein_image_01.yml" \
-		== expected
+	# The canonical path resolver uses get_image_spec_yaml, which returns
+	# the per-image folder path. Output files are in the same folder.
+	spec_yaml = pip.get_image_spec_yaml("spring_2026", 1)
+	assert spec_yaml.parent / "output-protein_image_01.yml" == expected

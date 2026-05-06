@@ -37,6 +37,8 @@
 - Hash records are written as canonical paths pointing to the image bank.
 - Duplicate checks ignore matches when the 9-digit RUID prefix matches (same student).
 - Archive files without a 9-digit prefix are still included in duplicate checks.
+- `--output-dir <path>` redirects working files to a custom path AND disables archive sync (no writes to `image_bank/`, no hash updates). Use this for ad-hoc reruns into scratch dirs.
+- `--archive-anyway` re-enables archive sync when paired with `--output-dir`. The archive folder name still resolves from the canonical semester layout, not the override path.
 
 ## Archive maintenance
 - Dry-run hash rebuild:
@@ -44,9 +46,9 @@
 - Rebuild hash database:
 	- `source source_me.sh && python tools/log_image_hashes.py --rebuild`
 - Migrate flat image_bank structure to term-organized:
-	- `source source_me.sh && python tools/migrate_image_bank_to_terms.py`
+	- `source source_me.sh && python local_migrations/migrate_image_bank_to_terms.py`
 - Apply the migration:
-	- `source source_me.sh && python tools/migrate_image_bank_to_terms.py --apply`
+	- `source source_me.sh && python local_migrations/migrate_image_bank_to_terms.py --apply`
 
 ## Common image questions
 - If `spec_yaml_files/common_image_questions.yml` exists, it is merged into each assignment.

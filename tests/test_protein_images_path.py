@@ -102,10 +102,8 @@ def test_per_term_paths(tmp_path, monkeypatch):
 	expected_term_dir = data_root / "semesters" / term
 	assert pip.get_term_dir(term) == expected_term_dir
 	assert pip.get_forms_dir(term) == expected_term_dir / "forms"
-	assert pip.get_yaml_dir(term) == expected_term_dir / "yaml"
-	assert pip.get_grades_dir(term) == expected_term_dir / "grades"
-	assert pip.get_submissions_dir(term) == expected_term_dir / "submissions"
 	assert pip.get_roster_csv(term) == expected_term_dir / "roster.csv"
+	assert pip.get_email_log_yaml(term) == expected_term_dir / "email_log.yml"
 
 
 def test_get_credentials_dir_is_user_local():
@@ -123,3 +121,126 @@ def test_module_import_does_not_touch_filesystem(monkeypatch):
 	monkeypatch.setattr(pathlib.Path, "exists", _boom)
 	import importlib
 	importlib.reload(pip)
+
+
+#============================================
+# Tests for new helpers (plan: unified image storage layout)
+
+def test_get_image_hashes_yaml(tmp_path, monkeypatch):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	hashes_yaml = pip.get_image_hashes_yaml()
+	assert hashes_yaml == tmp_path / "image_hashes.yml"
+
+
+def test_get_image_hashes_yaml_with_explicit_root(tmp_path):
+	hashes_yaml = pip.get_image_hashes_yaml(tmp_path)
+	assert hashes_yaml == tmp_path / "image_hashes.yml"
+
+
+def test_season_year_term_spring():
+	assert pip.season_year_term(2026, 1) == "spring_2026"
+	assert pip.season_year_term(2026, 3) == "spring_2026"
+	assert pip.season_year_term(2026, 5) == "spring_2026"
+
+
+def test_season_year_term_summer():
+	assert pip.season_year_term(2026, 6) == "summer_2026"
+	assert pip.season_year_term(2026, 7) == "summer_2026"
+	assert pip.season_year_term(2026, 8) == "summer_2026"
+
+
+def test_season_year_term_fall():
+	assert pip.season_year_term(2026, 9) == "fall_2026"
+	assert pip.season_year_term(2026, 11) == "fall_2026"
+	assert pip.season_year_term(2026, 12) == "fall_2026"
+
+
+def test_form_csv_to_image_dir_name():
+	# Simple case: replace first hyphen
+	assert pip._form_csv_to_image_dir_name("BCHM_Prot_Img_03-Hydrophobic_Interior.csv") == \
+		"BCHM_Prot_Img_03_Hydrophobic_Interior"
+	# Retain internal hyphens
+	assert pip._form_csv_to_image_dir_name("BCHM_Prot_Img_07-Alpha-Helix.csv") == \
+		"BCHM_Prot_Img_07_Alpha-Helix"
+	# Replace unsafe characters
+	assert pip._form_csv_to_image_dir_name("BCHM_Prot_Img_09-White Background.csv") == \
+		"BCHM_Prot_Img_09_White_Background"
+
+
+def test_form_csv_to_image_dir_name_not_csv():
+	with pytest.raises(ValueError) as excinfo:
+		pip._form_csv_to_image_dir_name("BCHM_Prot_Img_03-Foo.txt")
+	assert ".csv" in str(excinfo.value)
+
+
+def test_get_term_image_dir_existing_folder(tmp_path, monkeypatch):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	data_root = _make_data_root(tmp_path)
+	term = "spring_2026"
+	term_dir = data_root / "semesters" / term
+	term_dir.mkdir(parents=True)
+	image_dir = term_dir / "BCHM_Prot_Img_03_Foo"
+	image_dir.mkdir()
+	assert pip.get_term_image_dir(term, 3) == image_dir
+
+
+def test_get_term_image_dir_from_form_csv(tmp_path, monkeypatch):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	data_root = _make_data_root(tmp_path)
+	term = "spring_2026"
+	forms_dir = data_root / "semesters" / term / "forms"
+	forms_dir.mkdir(parents=True)
+	(forms_dir / "BCHM_Prot_Img_03-Hydrophobic_Interior.csv").write_text("dummy")
+	# Should return the path even though the directory doesn't exist yet
+	result = pip.get_term_image_dir(term, 3)
+	assert result.name == "BCHM_Prot_Img_03_Hydrophobic_Interior"
+
+
+def test_get_term_image_dir_missing_raises(tmp_path, monkeypatch):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	data_root = _make_data_root(tmp_path)
+	term = "spring_2026"
+	(data_root / "semesters" / term).mkdir(parents=True)
+	with pytest.raises(FileNotFoundError) as excinfo:
+		pip.get_term_image_dir(term, 3)
+	assert "Image 03 not found" in str(excinfo.value)
+
+
+def test_get_term_image_dir_ambiguous_folder_raises(tmp_path, monkeypatch):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	data_root = _make_data_root(tmp_path)
+	term = "spring_2026"
+	term_dir = data_root / "semesters" / term
+	term_dir.mkdir(parents=True)
+	(term_dir / "BCHM_Prot_Img_03_Foo").mkdir()
+	(term_dir / "BCHM_Prot_Img_03_Bar").mkdir()
+	with pytest.raises(RuntimeError) as excinfo:
+		pip.get_term_image_dir(term, 3)
+	assert "Multiple folders" in str(excinfo.value)
+	assert "BCHM_Prot_Img_03_Foo" in str(excinfo.value)
+	assert "BCHM_Prot_Img_03_Bar" in str(excinfo.value)
+
+
+def test_get_term_image_dir_ambiguous_csv_raises(tmp_path, monkeypatch):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	data_root = _make_data_root(tmp_path)
+	term = "spring_2026"
+	forms_dir = data_root / "semesters" / term / "forms"
+	forms_dir.mkdir(parents=True)
+	(forms_dir / "BCHM_Prot_Img_03-Foo.csv").write_text("dummy")
+	(forms_dir / "BCHM_Prot_Img_03-Bar.csv").write_text("dummy")
+	with pytest.raises(RuntimeError) as excinfo:
+		pip.get_term_image_dir(term, 3)
+	assert "Multiple form CSVs" in str(excinfo.value)
+
+
+def test_get_image_spec_yaml(tmp_path, monkeypatch):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	data_root = _make_data_root(tmp_path)
+	term = "spring_2026"
+	forms_dir = data_root / "semesters" / term / "forms"
+	forms_dir.mkdir(parents=True)
+	(forms_dir / "BCHM_Prot_Img_03-Foo.csv").write_text("dummy")
+	result = pip.get_image_spec_yaml(term, 3)
+	assert result.name == "protein_image_03.yml"
+	assert "BCHM_Prot_Img_03_Foo" in str(result)

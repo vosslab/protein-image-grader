@@ -5,6 +5,12 @@
 # Legacy Google Forms exports at repo root (planned to move under Protein_Images/semesters/<term>/forms/)
 /BCHM_Prot_Img_*.csv
 /current_students.csv
+# Legacy archive/ directory (deprecated; migrated to Protein_Images/image_bank)
+/archive/
+data/inputs/current_students.csv
+current_students.csv
+data/runs/*
+!data/runs/.gitkeep
 
 # Byte-compiled / optimized / DLL files
 service_key.json
@@ -12,13 +18,6 @@ __pycache__/
 *.py[codz]
 *$py.class
 Protein_Images_Archive_Content
-archive/**
-!archive/
-!archive/image_hashes.yml
-data/inputs/current_students.csv
-current_students.csv
-data/runs/*
-!data/runs/.gitkeep
 
 # C extensions
 *.so

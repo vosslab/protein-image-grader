@@ -3,6 +3,7 @@
 # Standard Library
 import os
 import argparse
+import pathlib
 
 # PIP3 modules
 import yaml
@@ -12,6 +13,7 @@ from PIL import Image
 # local repo modules
 import protein_image_grader.google_drive_image_utils as google_drive_image_utils
 import protein_image_grader.archive_paths as archive_paths
+import protein_image_grader.protein_images_path as protein_images_path
 
 def calculate_md5(image_path: str) -> str:
 	"""
@@ -64,13 +66,7 @@ def parse_args():
 	"""
 	Parse command line arguments.
 	"""
-	parser = argparse.ArgumentParser(description="Rebuild archive image hashes.")
-	parser.add_argument(
-		"--archive-root",
-		dest="archive_root",
-		default="archive",
-		help="Archive root directory.",
-	)
+	parser = argparse.ArgumentParser(description="Rebuild image bank hashes from canonical archive layout.")
 	parser.add_argument(
 		"--rebuild",
 		dest="rebuild",
@@ -82,15 +78,14 @@ def parse_args():
 
 
 #============================================
-def collect_image_bank(archive_root: str) -> list:
+def collect_image_bank(image_bank_path: pathlib.Path | str) -> list:
 	"""
-	Collect image files below image_bank/ folders (canonical name).
+	Collect image files from the canonical image_bank/ structure.
 	"""
 	image_files = []
-	for root, dirs, files in os.walk(archive_root):
+	image_bank_path = pathlib.Path(image_bank_path)
+	for root, dirs, files in os.walk(str(image_bank_path)):
 		dirs.sort()
-		if 'image_bank' not in root.split(os.sep):
-			continue
 		for file in sorted(files):
 			full_path = os.path.join(root, file)
 			if os.path.isfile(full_path):
@@ -100,19 +95,20 @@ def collect_image_bank(archive_root: str) -> list:
 
 
 #============================================
-def rebuild_hashes(archive_root: str) -> dict:
+def rebuild_hashes(image_bank_path: pathlib.Path | str) -> dict:
 	"""
-	Rebuild archive hashes from image files.
+	Rebuild image hashes from canonical image_bank structure.
 	"""
 	# Initialize dictionaries to hold hash values and file names
 	md5_dict = {}
 	phash_dict = {}
 
-	if not os.path.isdir(archive_root):
-		raise ValueError(f"Archive directory not found: {archive_root}")
+	image_bank_path = pathlib.Path(image_bank_path)
+	if not image_bank_path.is_dir():
+		raise ValueError(f"Image bank directory not found: {image_bank_path}")
 
-	# Iterate over each file in the archive images folders
-	image_files = collect_image_bank(archive_root)
+	# Iterate over each file in the image_bank
+	image_files = collect_image_bank(image_bank_path)
 	summarize_extensions(image_files)
 	for filepath in image_files:
 		print(filepath)
@@ -135,12 +131,13 @@ def main():
 	Run the hash rebuild script.
 	"""
 	args = parse_args()
-	archive_hashes = os.path.join(args.archive_root, 'image_hashes.yml')
-	image_hashes = rebuild_hashes(args.archive_root)
+	image_bank_path = protein_images_path.get_image_bank_dir()
+	hashes_yaml_path = protein_images_path.get_image_hashes_yaml()
+	image_hashes = rebuild_hashes(image_bank_path)
 
 	# Save the dictionaries to a YAML file
 	if args.rebuild:
-		with open(archive_hashes, 'w') as f:
+		with open(hashes_yaml_path, 'w') as f:
 			yaml.dump(image_hashes, f)
 	else:
 		print("Dry-run complete. Use --rebuild to write image_hashes.yml.")

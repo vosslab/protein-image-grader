@@ -39,5 +39,5 @@ Protein_Images/
 ## Path resolution
 - `protein_image_grader/protein_images_path.py` centralizes all Protein_Images/ path logic.
 - `protein_image_grader/archive_paths.py` normalizes archive paths for hashing.
-- `tools/migrate_image_bank_to_terms.py` migrates flat image_bank/ to term-organized layout.
+- `local_migrations/migrate_image_bank_to_terms.py` migrates flat image_bank/ to term-organized layout.
 - `tools/log_image_hashes.py` rebuilds the cheat detection database from archive sources.

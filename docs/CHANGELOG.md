@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-05-08
+
+### Additions and New Features
+- Add `tests/test_download_submission_images.py::test_get_image_html_tag_trim_dual_write`. Exercises `get_image_html_tag` with `args.trim=True` and asserts (a) raw lands in `<image_dir>/raw/`, (b) trim lands in `<image_dir>/trim/<basename>-trim.jpg` (not next to raw), (c) both archived to `archive_root/{raw,trim}/`, (d) two distinct `image_hashes` entries are recorded. Closes the test gap flagged in code review: only the raw path was previously covered.
+
+### Behavior or Interface Changes
+- `download_submission_images.py` now uses `archive_paths.make_archive_assignment_dir(term, image_dir.name)` to build the archive root instead of constructing it inline. The previous inline build was wrapped in a broad `except Exception` that silently disabled archiving on any failure; this is replaced with a direct call that surfaces real errors.
+- `local_migrations/migrate_image_bank_to_terms.py` now removes the source file when MD5 matches the destination ("identical-md5 -> delete source" per plan). Without this, a partial first run would leave source files in place and `os.rmdir` could not clean the source folder. Re-runs are now truly idempotent.
+
+### Fixes and Maintenance
+- Refactor `start_grading.build_status_row` to resolve `image_dir = get_term_image_dir(term, image_number)` once instead of twice in two separate try blocks. If resolution fails or is ambiguous, every dependent status (downloaded/graded/bb_upload) defaults to `MISSING` consistently.
+- Refresh `README.md`: replace the "Planned canonical layout, migration not yet applied" tree with the actual implemented per-image folder layout, fix the stale `archive/` description (hash database lives at repo root), and update quick-start to point at `start_grading.py` instead of calling `grade_protein_image.py` and `send_feedback_email.py` directly.
+- Trim `README.md` further per `/readme-fix`: drop the duplicated canonical-layout tree (now solely in `docs/FILE_STRUCTURE.md`), expand the documentation list to include `USAGE.md`, `ARCHIVE_PROCESS.md`, `RUID_POLICY.md`, `PYTHON_STYLE.md`, `REPO_STYLE.md`, and add a verifiable Testing section (`pytest tests/`).
+- Update `docs/RUID_POLICY.md` path examples to use the canonical per-image folder layout (`<image_dir>/output-protein_image_NN.csv` and `<image_dir>/blackboard_upload-...`) instead of the deleted `grades/` subdir.
+- Document `--archive-anyway` in `docs/USAGE.md` "Archive behavior" and `docs/ARCHIVE_PROCESS.md` download-flow sections. The flag re-enables archive sync when paired with `--output-dir`; without it, `--output-dir` disables archive writes by default.
+- Style nits: replace `from typing import Optional` with `int | None` in `tests/test_shebangs.py`; move `import time` to module top in `local_migrations/migrate_image_bank_to_terms.py`; remove a stale "submissions/download_NN_raw/" comment from `download_submission_images.py`.
+- Fix `archive_paths.normalize_hash_path` for absolute-path inputs. Previously, an absolute path under `Protein_Images/image_bank/` was stripped via `relative_to`, leaving the result without an `image_bank/` prefix; the canonical-prefix check then rejected it. Now the helper re-prefixes with `image_bank/` after the strip so absolute and relative inputs validate uniformly. Bug was masked because tests only exercised relative inputs; `tools/log_image_hashes.py` and the migration tool both pass absolute paths from `os.walk`, so neither could run end-to-end before this fix. Two new tests cover the absolute-path path: under `image_bank/<term>/...` and under the legacy flat roots.
+- Add `archive_paths.LEGACY_FLAT_ROOTS = ("MIXED", "PDB_IMAGES")` to document the two well-known non-term subdirs of `Protein_Images/image_bank/`. `MIXED/` holds student submissions that predate the RUID-xxx filename convention; `PDB_IMAGES/` holds curated PDB references. Both are hashed for plagiarism detection but never written to by new code; the migration tool intentionally leaves both flat. A per-file term-binning attempt for `MIXED/` was prototyped and dropped: every file's `st_birthtime` reflects when it was batch-imported into the folder (all 250 files showed spring_2024), not original creation, so binning by timestamp added no real signal.
+- `docs/ARCHIVE_PROCESS.md`: correct the canonical hash-path examples - paths in `image_hashes.yml` are relative to `Protein_Images/`, not the repo root, so the `Protein_Images/` prefix should not be shown in example values.
+- `docs/USAGE.md`, `docs/ARCHIVE_PROCESS.md`, `docs/FILE_STRUCTURE.md`: update migration tool path from `tools/migrate_image_bank_to_terms.py` to `local_migrations/migrate_image_bank_to_terms.py` (one-shot migrations belong under `local_migrations/`).
+
 ## 2026-05-07
 
 ### Additions and New Features

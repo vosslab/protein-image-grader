@@ -4,13 +4,13 @@
 import pathlib
 import subprocess
 
-# local repo modules
-import protein_image_grader.rmspaces
-
-ARCHIVE_ROOT_NAME = "archive"
 IMAGE_BANK_NAME = "image_bank"
-LEGACY_IMPORT_TERM = "legacy_import"
-IMAGE_HASHES_NAME = "image_hashes.yml"
+
+# Legacy flat-roots inside image_bank/ that are not term-organized:
+# - MIXED/: student images that predate the RUID-xxx naming convention
+# - PDB_IMAGES/: curated PDB reference images
+# Both are hashed for plagiarism detection but never written to by new code.
+LEGACY_FLAT_ROOTS = ("MIXED", "PDB_IMAGES")
 
 
 #============================================
@@ -51,100 +51,39 @@ def path_to_posix(path: pathlib.Path | str) -> str:
 
 
 #============================================
-def make_term_label(year: int, semester: str) -> str:
+# Archive path builders for NAS-resident image_bank/ and term-organized structure.
+
+def make_image_bank_dir(term: str) -> pathlib.Path:
 	"""
-	Build an archive term label.
+	Build the image_bank directory for a term on the NAS.
 
 	Args:
-		year: Four-digit year.
-		semester: Term name or numbered term label.
+		term: Term in canonical form, e.g. 'spring_2026'.
 
 	Returns:
-		str: Term label such as 2026_1Spring.
+		pathlib.Path: <protein_images>/image_bank/<term>
 	"""
-	term_text = str(semester).strip()
-	term_map = {
-		"spring": "1Spring",
-		"1spring": "1Spring",
-		"summer": "2Summer",
-		"2summer": "2Summer",
-		"fall": "3Fall",
-		"autumn": "3Fall",
-		"3fall": "3Fall",
-	}
-	term_key = term_text.lower()
-	if term_key in term_map:
-		term_text = term_map[term_key]
-	if term_text == LEGACY_IMPORT_TERM:
-		label = LEGACY_IMPORT_TERM
-	else:
-		label = f"{int(year):04d}_{term_text}"
-	return label
+	import protein_image_grader.protein_images_path as protein_images_path
+	return protein_images_path.get_image_bank_dir() / term
 
 
 #============================================
-def make_term_label_from_month(year: int, month: int) -> str:
+def make_archive_assignment_dir(term: str, image_dir_name: str) -> pathlib.Path:
 	"""
-	Build an archive term label from a month number.
-	"""
-	if 1 <= month <= 5:
-		semester = "1Spring"
-	elif 6 <= month <= 8:
-		semester = "2Summer"
-	else:
-		semester = "3Fall"
-	label = make_term_label(year, semester)
-	return label
+	Build the archive assignment directory on the NAS.
 
+	The working folder and archive folder share the exact same string so
+	they stay in sync. The folder name comes from get_term_image_dir(term, NN).name,
+	not from parameters.
 
-#============================================
-def make_assignment_archive_folder(image_number: int, assignment_name: str | None) -> str:
-	"""
-	Build the assignment archive folder name.
-	"""
-	folder = f"BCHM_Prot_Img_{image_number:02d}"
-	if assignment_name:
-		clean_name = protein_image_grader.rmspaces.cleanName(assignment_name)
-		if clean_name:
-			folder = f"{folder}_{clean_name}"
-	return folder
+	Args:
+		term: Term in canonical form, e.g. 'spring_2026'.
+		image_dir_name: The directory name (e.g. 'BCHM_Prot_Img_01_White_Background').
 
-
-#============================================
-def get_image_hashes_path(repo_root: pathlib.Path | None = None) -> pathlib.Path:
+	Returns:
+		pathlib.Path: <protein_images>/image_bank/<term>/<image_dir_name>
 	"""
-	Build the archive hash YAML path.
-	"""
-	if repo_root is None:
-		repo_root = get_repo_root()
-	path = repo_root / ARCHIVE_ROOT_NAME / IMAGE_HASHES_NAME
-	return path
-
-
-#============================================
-def make_image_bank_dir(term_label: str, repo_root: pathlib.Path | None = None) -> pathlib.Path:
-	"""
-	Build the image_bank directory for a term in the local repo archive.
-	"""
-	if repo_root is None:
-		repo_root = get_repo_root()
-	path = repo_root / ARCHIVE_ROOT_NAME / term_label / IMAGE_BANK_NAME
-	return path
-
-
-#============================================
-def make_archive_assignment_dir(
-	image_number: int,
-	assignment_name: str | None,
-	term_label: str,
-	repo_root: pathlib.Path | None = None,
-) -> pathlib.Path:
-	"""
-	Build the archive assignment directory.
-	"""
-	assignment_folder = make_assignment_archive_folder(image_number, assignment_name)
-	path = make_image_bank_dir(term_label, repo_root) / assignment_folder
-	return path
+	return make_image_bank_dir(term) / image_dir_name
 
 
 #============================================
@@ -164,54 +103,56 @@ def _strip_repo_prefix(path_text: str, repo_root: pathlib.Path) -> str:
 
 
 #============================================
-# Legacy literal recognized in old hash records (pre-migration). Production
-# code never writes this; kept only to recognize and rewrite legacy strings
-# from migration-era reports or stale tools output.
-_LEGACY_ARCHIVE_IMAGES_LITERAL = "ARCHIVE_IMAGES"
-
-
-def _rewrite_legacy_archive_images(path_text: str) -> str:
-	"""
-	Rewrite legacy ARCHIVE_IMAGES/ prefix (and per-term variant) to canonical
-	image_bank/.
-	"""
-	prefix = f"{_LEGACY_ARCHIVE_IMAGES_LITERAL}/"
-	if path_text == _LEGACY_ARCHIVE_IMAGES_LITERAL:
-		raise ValueError("Archive path points to ARCHIVE_IMAGES without a file path.")
-	if path_text.startswith(prefix):
-		remainder = path_text[len(prefix):]
-		path_text = f"{IMAGE_BANK_NAME}/{remainder}"
-	# Rewrite per-term legacy: archive/<term>/ARCHIVE_IMAGES/... -> archive/<term>/image_bank/...
-	per_term_legacy = f"/{_LEGACY_ARCHIVE_IMAGES_LITERAL}/"
-	if per_term_legacy in path_text:
-		path_text = path_text.replace(per_term_legacy, f"/{IMAGE_BANK_NAME}/")
-	return path_text
-
-
-#============================================
 def normalize_hash_path(
 	path_text: str,
 	repo_root: pathlib.Path | None = None,
 ) -> str:
 	"""
-	Normalize a hash YAML file path to a canonical repo- or data-root-relative
-	POSIX string.
+	Normalize a hash YAML file path to a canonical relative POSIX string.
 
-	Canonical formats:
-	- image_bank/<rel>                 (Synology image bank, resolved via helper)
-	- archive/<term>/image_bank/<rel>  (per-term repo bucket)
+	Accepts only:
+	- Absolute paths under Protein_Images/image_bank/ -> converts to
+	  image_bank/<term>/<image_dir>/{raw,trim}/<file>
+	- Already-relative paths in the canonical shape above
+
+	Rejects everything else with ValueError.
 	"""
 	if repo_root is None:
 		repo_root = get_repo_root()
 	clean_text = path_to_posix(path_text).strip()
 	if not clean_text:
 		raise ValueError("Archive path is empty.")
-	clean_text = _strip_repo_prefix(clean_text, repo_root)
+
+	# Strip absolute NAS paths under Protein_Images/image_bank/ to a relative
+	# tail and re-prefix with image_bank/ so the canonical check below applies
+	# uniformly to absolute and relative inputs.
+	path_obj = pathlib.Path(path_text)
+	if path_obj.is_absolute():
+		try:
+			import protein_image_grader.protein_images_path
+			image_bank_path = protein_image_grader.protein_images_path.get_image_bank_dir()
+		except (FileNotFoundError, NotADirectoryError) as exc:
+			raise ValueError(
+				f"Cannot resolve image_bank/ for absolute path: {path_text}"
+			) from exc
+		try:
+			relative_obj = path_obj.relative_to(image_bank_path)
+		except ValueError as exc:
+			raise ValueError(
+				f"Absolute path not under image_bank: {path_text}"
+			) from exc
+		clean_text = f"{IMAGE_BANK_NAME}/{path_to_posix(relative_obj)}"
+
+	# Convert to POSIX
+	clean_text = path_to_posix(clean_text).strip()
 	clean_text = clean_text.lstrip("./")
-	clean_text = _rewrite_legacy_archive_images(clean_text)
-	canonical_prefixes = (f"{ARCHIVE_ROOT_NAME}/", f"{IMAGE_BANK_NAME}/")
-	if not clean_text.startswith(canonical_prefixes):
-		raise ValueError(f"Archive path cannot be normalized: {path_text}")
+
+	# Accept canonical image_bank/ prefix (term-organized or legacy flat roots).
+	if not clean_text.startswith(f"{IMAGE_BANK_NAME}/"):
+		raise ValueError(
+			f"Archive path must be in image_bank/<term>/<image_dir>/{{raw,trim}}/<file> "
+			f"form (or under {'/, '.join(LEGACY_FLAT_ROOTS)}/): {path_text}"
+		)
 	return clean_text
 
 
@@ -220,13 +161,13 @@ def resolve_archive_path(path_text: str, repo_root: pathlib.Path) -> pathlib.Pat
 	"""
 	Resolve an archive path to a candidate local file path.
 
-	- Bare image_bank/<rel> resolves through the Synology helper to
-	  Protein_Images/image_bank/<rel>.
-	- archive/<term>/... resolves to <repo_root>/<path>.
-	- Resolution may return a path that does not exist; callers decide.
+	Bare image_bank/<rel> resolves through the Synology helper to
+	Protein_Images/image_bank/<rel>.
+
+	Resolution may return a path that does not exist; callers decide.
 	"""
 	# Local import to avoid a circular import at module load time.
-	import protein_image_grader.protein_images_path as protein_images_path
+	import protein_image_grader.protein_images_path
 	clean_text = path_to_posix(path_text).strip()
 	if not clean_text:
 		raise ValueError("Archive path is empty.")
@@ -234,10 +175,8 @@ def resolve_archive_path(path_text: str, repo_root: pathlib.Path) -> pathlib.Pat
 	if path.is_absolute():
 		return path
 	clean_text = clean_text.lstrip("./")
-	clean_text = _rewrite_legacy_archive_images(clean_text)
 	external_prefix = f"{IMAGE_BANK_NAME}/"
 	if clean_text.startswith(external_prefix):
 		remainder = clean_text[len(external_prefix):]
-		return protein_images_path.get_image_bank_dir() / remainder
-	resolved_path = repo_root / clean_text
-	return resolved_path
+		return protein_image_grader.protein_images_path.get_image_bank_dir() / remainder
+	raise ValueError(f"Archive path must start with image_bank/: {path_text}")
