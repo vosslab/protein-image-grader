@@ -1,13 +1,18 @@
+# Standard Library
 import os
 import time
-import yaml
 import random
 import argparse
-#pip3 install py-applescript
-import applescript
 
+# PIP3 modules
+import yaml
+
+# local repo modules
 import protein_image_grader.email_log as email_log
+import protein_image_grader.roster_matching as roster_matching
 import protein_image_grader.protein_images_path as protein_images_path
+import protein_image_grader.no_submission_email as no_submission_email
+import protein_image_grader.applescript_dispatch as applescript_dispatch
 
 ACCEPTABLE_DOMAINS = [
 	'gmail.com',
@@ -20,50 +25,6 @@ FIX_DOMAINS = {
 	'mail.roosevel.edu': 'mail.roosevelt.edu',
 }
 
-
-#===============================================
-#===============================================
-#https://apple.stackexchange.com/questions/125822/applescript-automate-mail-tasks
-def compose_script(recipient_name: str, email_addresses: list, subject: str, content: str):
-	"""
-	Compose an AppleScript to send an email via the Mail application.
-
-	Args:
-		recipient_name (str): Name of the email recipient.
-		email_address (str): Email address of the recipient.
-		subject (str): Subject of the email.
-		content (str): Content/body of the email.
-
-	Returns:
-		str: AppleScript script to send the email.
-
-	Reference:
-		https://apple.stackexchange.com/questions/125822/applescript-automate-mail-tasks
-	"""
-	# Initialize the script_text with common parts
-
-	script_text = f'''
-	set theSubject to "{subject}"
-	set theContent to "{content}"
-
-	tell application "Mail"
-		set theMessage to make new outgoing message with properties {{subject:theSubject, content:theContent, visible:true}}
-		tell theMessage
-	'''
-	# Loop through each email address and add a new recipient
-	for email_address in email_addresses:
-		if '@' not in email_address:
-			raise ValueError(f"invalid email address: {email_address}")
-		script_text += f'''
-			make new to recipient with properties {{name:"{recipient_name}", address:"{email_address}"}}
-		'''
-	# Complete the script by adding the send command
-	script_text += '''
-			send
-		end tell
-	end tell
-	'''
-	return script_text
 
 #===============================================
 def make_email_header(student_entry):
@@ -168,25 +129,17 @@ def make_content(student_entry, config):
 	return content
 
 #===============================================
-#===============================================
-def run_script(script_text):
-	print(script_text)
-	time.sleep(0.1)
-	scpt = applescript.AppleScript(script_text)
-	scpt.run()
-	return
-
-#===============================================
 def default_send_func(student_entry: dict, subject: str, body: str) -> None:
 	"""
 	Default send_func injected into send_feedback_for_image.
 
-	Composes the AppleScript and runs it. Tests inject a fake instead so
-	they never touch Mail.app.
+	Composes the AppleScript via the shared dispatcher and runs it.
+	Tests inject a fake instead so they never touch Mail.app.
 	"""
 	recipient_name, email_addresses = make_email_header(student_entry)
-	script = compose_script(recipient_name, email_addresses, subject, body)
-	run_script(script)
+	script = applescript_dispatch.compose_script(
+		recipient_name, email_addresses, subject, body)
+	applescript_dispatch.run_script(script)
 
 
 #===============================================
@@ -308,11 +261,33 @@ def main():
 			student_tree, image_number, args.term, args.dry_run,
 			default_send_func, config,
 		)
+
+		# Non-submitter pass: every roster Student ID not present in the
+		# graded YAML gets a brief "no submission received" notice.
+		roster_csv = protein_images_path.get_roster_csv(args.term)
+		if not roster_csv.is_file():
+			raise FileNotFoundError(
+				f"Roster CSV required for non-submitter pass: {roster_csv}"
+			)
+		roster = roster_matching.read_roster(str(roster_csv))
+		submitted_ids = {str(entry['Student ID']) for entry in student_tree}
+		missing_rows = no_submission_email.compute_non_submitters(
+			roster, submitted_ids)
+		random.shuffle(missing_rows)
+		ns_counters = no_submission_email.send_no_submission_for_image(
+			missing_rows, image_number, args.term, args.dry_run,
+			no_submission_email.default_no_submission_send_func, config,
+		)
+
 		print(
 			f"Summary: sent={counters['sent']}"
 			f" failed={counters['failed']}"
 			f" dry_run={counters['dry_run']}"
 			f" skipped={counters['skipped']}"
+			f" no_submission_sent={ns_counters['no_submission_sent']}"
+			f" no_submission_failed={ns_counters['no_submission_failed']}"
+			f" no_submission_dry_run={ns_counters['no_submission_dry_run']}"
+			f" no_submission_skipped={ns_counters['no_submission_skipped']}"
 		)
 		return
 
@@ -330,21 +305,21 @@ def main():
 		email_subject = "Feedback for " + config['assignment name']
 		recipient_name, email_addresses = make_email_header(student_entry)
 		email_content = make_content(student_entry, config)
-		email_script = compose_script(recipient_name, email_addresses,
-			email_subject, email_content)
+		email_script = applescript_dispatch.compose_script(
+			recipient_name, email_addresses, email_subject, email_content)
 		print(email_script)
 		if not args.dry_run:
 			print("WARNING RUNNING SCRIPT NOW")
 			time.sleep(0.2)
-			run_script(email_script)
+			applescript_dispatch.run_script(email_script)
 		else:
 			print(
 				f"Would send email to {recipient_name} {email_addresses}"
 				f" with subject '{email_subject}'.")
 			email_addresses = ["nvoss@roosevelt.edu", ]
-			email_script = compose_script(recipient_name, email_addresses,
-				email_subject, email_content)
-			run_script(email_script)
+			email_script = applescript_dispatch.compose_script(
+				recipient_name, email_addresses, email_subject, email_content)
+			applescript_dispatch.run_script(email_script)
 			# Legacy dry-run mode: single test email to instructor, stop.
 			break
 

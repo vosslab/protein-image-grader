@@ -32,7 +32,11 @@ import yaml
 import protein_image_grader.protein_images_path as protein_images_path
 
 
-VALID_STATUSES = ("sent", "failed", "dry_run")
+# VALID_STATUSES are every value a cell may carry. CLOSING_STATUSES is the
+# subset that closes out an expected Student ID for the email step: a roster
+# row counts as "heard back from us" only when its cell is in this set.
+VALID_STATUSES = ("sent", "failed", "dry_run", "no_submission_sent")
+CLOSING_STATUSES = frozenset({"sent", "no_submission_sent"})
 
 
 #============================================
@@ -160,7 +164,9 @@ def summarize_image(data: dict, image_number: int,
 	Only `expected_student_ids` count; extra/old IDs in the log are
 	ignored. Returns:
 	  - "MISSING" when no expected student has any status for this image.
-	  - "OK" when every expected student has status exactly "sent".
+	  - "OK" when every expected student has a closing status, that is
+	    "sent" (real feedback) or "no_submission_sent" (no-submission
+	    notice). Mixed populations of the two still close OK.
 	  - "PARTIAL" otherwise. A single dry_run or failed cell among the
 	    expected IDs forces PARTIAL, so a dry-run pass cannot light OK.
 	"""
@@ -173,7 +179,7 @@ def summarize_image(data: dict, image_number: int,
 	any_status = any(s is not None for s in statuses)
 	if not any_status:
 		return "MISSING"
-	all_sent = all(s == "sent" for s in statuses)
-	if all_sent:
+	all_closed = all(s in CLOSING_STATUSES for s in statuses)
+	if all_closed:
 		return "OK"
 	return "PARTIAL"

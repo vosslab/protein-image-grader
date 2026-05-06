@@ -164,6 +164,52 @@ def test_summarize_image_partial_when_dry_run_present():
 	assert email_log.summarize_image(data, 1, expected) == "PARTIAL"
 
 
+def test_summarize_image_ok_when_all_no_submission_sent():
+	# A pure non-submitter population still closes OK.
+	data = {}
+	for sid, user in (("900646199", "adarbanova"),
+			("900620160", "cvirgen")):
+		email_log.set_status(data, sid, 1, "no_submission_sent", "t",
+			user, f"{user}@mail.roosevelt.edu")
+	expected = ["900646199", "900620160"]
+	assert email_log.summarize_image(data, 1, expected) == "OK"
+
+
+def test_summarize_image_ok_when_mixed_sent_and_no_submission_sent():
+	# Mixed populations of the two closing statuses still light OK.
+	data = {}
+	email_log.set_status(data, "900646199", 1, "sent", "t",
+		"adarbanova", "adarbanova@mail.roosevelt.edu")
+	email_log.set_status(data, "900620160", 1, "no_submission_sent", "t",
+		"cvirgen", "cvirgen@mail.roosevelt.edu")
+	expected = ["900646199", "900620160"]
+	assert email_log.summarize_image(data, 1, expected) == "OK"
+
+
+def test_summarize_image_partial_when_no_submission_dry_run_present():
+	# A dry-run cell among non-submitters still forces PARTIAL.
+	data = {}
+	email_log.set_status(data, "900646199", 1, "no_submission_sent", "t",
+		"adarbanova", "adarbanova@mail.roosevelt.edu")
+	email_log.set_status(data, "900620160", 1, "dry_run", "t",
+		"cvirgen", "cvirgen@mail.roosevelt.edu")
+	expected = ["900646199", "900620160"]
+	assert email_log.summarize_image(data, 1, expected) == "PARTIAL"
+
+
+def test_set_status_accepts_no_submission_sent_round_trip(tmp_path,
+		monkeypatch):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	_make_term_skeleton(tmp_path, "spring_2026")
+	data = {}
+	email_log.set_status(data, "900646199", 1, "no_submission_sent",
+		"2026-05-08T09:00:00", "adarbanova",
+		"adarbanova@mail.roosevelt.edu")
+	email_log.save("spring_2026", data)
+	loaded = email_log.load("spring_2026")
+	assert loaded["900646199"]["image_01"]["status"] == "no_submission_sent"
+
+
 def test_summarize_image_ignores_extra_ids():
 	data = {}
 	email_log.set_status(data, "900646199", 1, "sent", "t",

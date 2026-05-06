@@ -8,19 +8,23 @@ grade_protein_image.py for one image at a time. Never batch-grades.
 """
 
 # Standard Library
+import os
 import sys
+import csv
 import shutil
 import pathlib
 import argparse
 import subprocess
 
 # PIP3 modules
-import yaml
 import tabulate
 
 # local repo modules
 import protein_image_grader.email_log as email_log
+import protein_image_grader.csv_compare as csv_compare
+import protein_image_grader.form_columns as form_columns
 import protein_image_grader.archive_paths as archive_paths
+import protein_image_grader.roster_matching as roster_matching
 import protein_image_grader.protein_images_path as protein_images_path
 
 
@@ -76,32 +80,57 @@ def find_canonical_form_csvs(term: str) -> dict:
 def auto_import_repo_root_csvs(term: str) -> list:
 	"""
 	Move repo-root BCHM_Prot_Img_##-*.csv files into the canonical forms
-	directory for `term`. Returns the list of moves performed as
-	[(src_path, dst_path), ...].
+	directory for `term`. Returns one record per source file as
+	[(src_path, dst_path, action), ...] where action is one of
+	"moved", "identical", or "replaced".
 
-	Filesystem move only (shutil.move). Protein_Images/ is gitignored, so
-	`git mv` would be wrong here. Refuses to overwrite an existing
-	destination and raises FileExistsError.
+	Filesystem move only (shutil.move). Protein_Images/ is gitignored,
+	so `git mv` would be wrong here.
+
+	Collision policy (when a destination already exists):
+	  - byte-identical (SHA-256 match) -> delete the root copy silently
+	    with a "+ identical" notice; action="identical".
+	  - strict keyed superset (every shared (Student ID, timestamp)
+	    key has byte-identical row content; candidate may add more) ->
+	    overwrite canonical via os.replace; action="replaced".
+	  - any other divergence (header drift, removed key, changed cells,
+	    duplicate key) -> raise FileExistsError naming the specific
+	    reason.
 	"""
 	root_csvs = find_repo_root_form_csvs()
 	if not root_csvs:
 		return []
 	forms_dir = protein_images_path.get_forms_dir(term)
 	forms_dir.mkdir(parents=True, exist_ok=True)
-	moves = []
+	results = []
 	for src in root_csvs:
 		dst = forms_dir / src.name
-		if dst.exists():
-			message = (
-				f"ERROR: cannot import {src}; destination already exists:\n"
-				f"  {dst}\n"
-				"Resolve the duplicate manually before re-running."
-			)
-			raise FileExistsError(message)
-		print(f"+ move {src.name} -> {dst}")
-		shutil.move(str(src), str(dst))
-		moves.append((src, dst))
-	return moves
+		if not dst.exists():
+			print(f"+ move {src.name} -> {dst}")
+			shutil.move(str(src), str(dst))
+			results.append((src, dst, "moved"))
+			continue
+		# Collision -- decide by content.
+		if csv_compare.hash_csv(src) == csv_compare.hash_csv(dst):
+			print(f"+ identical, removed root copy {src.name}")
+			os.unlink(src)
+			results.append((src, dst, "identical"))
+			continue
+		ok, reason, added = csv_compare.is_strict_form_superset(dst, src)
+		if ok:
+			print(f"+ superset, replaced canonical {src.name} ({reason})")
+			os.replace(str(src), str(dst))
+			results.append((src, dst, "replaced"))
+			continue
+		message = (
+			f"ERROR: cannot import {src}; destination already exists\n"
+			f"  and the new file is not a strict keyed superset of:\n"
+			f"  {dst}\n"
+			f"  reason: {reason}\n"
+			"Resolve the divergence manually before re-running."
+		)
+		raise FileExistsError(message)
+	return results
 
 
 #============================================
@@ -121,6 +150,53 @@ def detect_canonical_duplicates(term: str) -> dict:
 
 
 #============================================
+def count_form_records(canonical_csv: pathlib.Path) -> int:
+	"""
+	Return the number of data rows in `canonical_csv` whose Student-ID
+	cell is non-empty.
+
+	Uses form_columns.resolve_meta_columns(required={"Student ID"}) to
+	locate the Student-ID column; the form CSV may put it anywhere in
+	the first IDENTITY_PREFIX_COLUMNS header cells. Counts records,
+	not unique students -- the grader emits one output row per form
+	submission, so the dashboard comparison is record-vs-record.
+	"""
+	with open(canonical_csv, "r", encoding="utf-8", newline="") as handle:
+		reader = csv.reader(handle)
+		all_rows = list(reader)
+	if not all_rows:
+		return 0
+	header = all_rows[0]
+	resolved = form_columns.resolve_meta_columns(header,
+		required={"Student ID"})
+	id_idx = resolved["Student ID"]
+	count = 0
+	for row in all_rows[1:]:
+		if len(row) <= id_idx:
+			continue
+		if row[id_idx].strip():
+			count += 1
+	return count
+
+
+#============================================
+def count_graded_records(output_csv: pathlib.Path) -> int:
+	"""
+	Return the number of data rows in `output_csv` whose Student-ID
+	cell is non-empty. The grader's output CSV has a literal
+	"Student ID" header column.
+	"""
+	with open(output_csv, "r", encoding="utf-8", newline="") as handle:
+		reader = csv.DictReader(handle)
+		count = 0
+		for row in reader:
+			value = row["Student ID"]
+			if value and value.strip():
+				count += 1
+	return count
+
+
+#============================================
 def is_non_empty_dir(path: pathlib.Path) -> bool:
 	if not path.is_dir():
 		return False
@@ -133,8 +209,10 @@ def is_non_empty_dir(path: pathlib.Path) -> bool:
 def build_status_row(image_number: int, term: str,
 		canonical_csvs: dict) -> dict:
 	"""
-	Build one dashboard row for the given image number. Pure function:
-	only inspects existence/non-emptiness of paths.
+	Build one dashboard row for the given image number. Inspects path
+	existence/non-emptiness and -- when the form CSV and graded output
+	both exist -- compares record counts so the `graded` column can
+	flip to PARTIAL on a fresh re-import that added new submissions.
 
 	New layout: uses per-image folders under semesters/<term>/<image_dir>/.
 	"""
@@ -153,6 +231,8 @@ def build_status_row(image_number: int, term: str,
 	except (FileNotFoundError, RuntimeError):
 		image_dir = None
 
+	form_count = None
+	graded_count = None
 	if image_dir is None:
 		downloaded_status = "MISSING"
 		graded_status = "MISSING"
@@ -163,6 +243,18 @@ def build_status_row(image_number: int, term: str,
 		graded_status = "OK" if graded_csv.is_file() else "MISSING"
 		bb_csv = image_dir / f"blackboard_upload-protein_image_{image_number:02d}.csv"
 		bb_status = "OK" if bb_csv.is_file() else "MISSING"
+		# Compare counts only when both sides are usable. Form-side
+		# count needs exactly one canonical CSV (form_status == "OK");
+		# graded-side count needs the output CSV on disk.
+		if form_status == "OK" and graded_status == "OK":
+			form_count = count_form_records(csv_matches[0])
+			graded_count = count_graded_records(graded_csv)
+			# Strict less-than -> PARTIAL (operator must regrade the
+			# new row(s)). Equal counts stay OK. More-graded-than-form
+			# is handled in render_footer_warnings as a stale-output
+			# warning; status stays OK because no regrade would help.
+			if graded_count < form_count:
+				graded_status = "PARTIAL"
 
 	emailed_status = compute_emailed_status(term, image_number, graded_status)
 
@@ -177,6 +269,8 @@ def build_status_row(image_number: int, term: str,
 		"emailed": emailed_status,
 		"bb_upload": bb_status,
 		"next_step": next_step,
+		"form_count": form_count,
+		"graded_count": graded_count,
 	}
 	return row
 
@@ -188,26 +282,26 @@ def compute_emailed_status(term: str, image_number: int,
 	Compute the dashboard 'Emailed' column for one image.
 
 	Returns "MISSING" when grading has not happened yet (nothing to email)
-	or when the email log has no entry for any expected student. Otherwise
-	delegates to email_log.summarize_image with the Student IDs taken from
-	the graded YAML.
-
-	New layout: reads YAML from the per-image folder.
+	or when the roster CSV is absent. Otherwise delegates to
+	email_log.summarize_image with the Student IDs taken from the per-term
+	`roster.csv`. Closing the cell to "OK" therefore requires every roster
+	Student ID to have status `sent` (real feedback) or
+	`no_submission_sent` (no-submission notice). The graded YAML is no
+	longer the source of expected IDs; submitters are a subset of the
+	roster, and the email step now also covers non-submitters.
 	"""
 	if graded_status != "OK":
 		return "MISSING"
 	try:
-		image_dir = protein_images_path.get_term_image_dir(term, image_number)
-		graded_yaml = image_dir / f"output-protein_image_{image_number:02d}.yml"
+		roster_csv = protein_images_path.get_roster_csv(term)
 	except (FileNotFoundError, RuntimeError):
 		return "MISSING"
-	if not graded_yaml.is_file():
+	if not roster_csv.is_file():
 		return "MISSING"
-	with open(graded_yaml, "r", encoding="utf-8") as handle:
-		student_tree = yaml.safe_load(handle)
-	if not student_tree:
+	roster = roster_matching.read_roster(str(roster_csv))
+	if not roster:
 		return "MISSING"
-	expected_ids = [str(entry["Student ID"]) for entry in student_tree]
+	expected_ids = [str(student_id) for student_id in roster.keys()]
 	data = email_log.load(term)
 	return email_log.summarize_image(data, image_number, expected_ids)
 
@@ -231,6 +325,13 @@ def compute_next_step(form_status: str, downloaded_status: str,
 	# Download is non-interactive, so it is folded into the grade step:
 	# whenever the form CSV is OK but grading has not happened, the next
 	# action is "grade" (which auto-downloads first if needed).
+	if graded_status == "MISSING":
+		return "grade"
+	# PARTIAL graded means the form CSV grew (late submission) and the
+	# output CSV no longer covers every row. grade_protein_image.py is
+	# idempotent on already-graded students, so route to "regrade".
+	if graded_status == "PARTIAL":
+		return "regrade"
 	if graded_status != "OK":
 		return "grade"
 	# Graded already; email feedback before treating the image as done.
@@ -263,7 +364,7 @@ def render_dashboard(term: str) -> str:
 	output += tabulate.tabulate(table_rows, headers=headers,
 		tablefmt="simple")
 	output += "\n"
-	output += render_footer_warnings(term)
+	output += render_footer_warnings(term, rows=rows)
 	return output
 
 
@@ -294,11 +395,35 @@ def _path_status(path: pathlib.Path, want: str) -> str:
 
 
 #============================================
-def render_footer_warnings(term: str) -> str:
+def render_footer_warnings(term: str, rows: list = None) -> str:
 	"""
 	Print warnings that do not belong inside the table.
+
+	When `rows` is provided (the per-image dashboard rows produced by
+	build_status_row), also emit one line per image whose graded
+	status is PARTIAL with the form/graded record counts, and a
+	stale-output warning when graded_count > form_count.
 	"""
 	parts = []
+	if rows:
+		count_lines = []
+		for r in rows:
+			form_count = r["form_count"]
+			graded_count = r["graded_count"]
+			if form_count is None or graded_count is None:
+				continue
+			if r["graded"] == "PARTIAL":
+				count_lines.append(
+					f"image {r['image']}: {form_count} form records, "
+					f"{graded_count} graded records"
+				)
+			elif graded_count > form_count:
+				count_lines.append(
+					f"image {r['image']}: {graded_count} graded records "
+					f"exceed {form_count} form records (stale output?)"
+				)
+		if count_lines:
+			parts.append("\n".join(count_lines))
 	root_csvs = find_repo_root_form_csvs()
 	if root_csvs:
 		# Only happens if auto-import was skipped or failed earlier.
@@ -546,6 +671,8 @@ def auto_select_step(term: str, image_number: int) -> str:
 		return "grade"
 	if next_step == "email":
 		return "email"
+	if next_step == "regrade":
+		return "regrade"
 	if next_step == "regrade or upload":
 		return "regrade"
 	if next_step == "done":

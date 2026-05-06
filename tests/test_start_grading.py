@@ -66,6 +66,11 @@ def test_auto_import_moves_repo_root_csvs(tmp_path, monkeypatch):
 	_drop_root_csv(tmp_path, 7)
 	moves = sg.auto_import_repo_root_csvs("spring_2026")
 	assert len(moves) == 2
+	# Every move record is a (src, dst, action) triple after the
+	# content-aware-collision rewrite.
+	for record in moves:
+		assert len(record) == 3
+		assert record[2] == "moved"
 	forms_dir = pip.get_forms_dir("spring_2026")
 	assert (forms_dir / "BCHM_Prot_Img_04-Example.csv").is_file()
 	assert (forms_dir / "BCHM_Prot_Img_07-Example.csv").is_file()
@@ -83,15 +88,39 @@ def test_auto_import_creates_forms_dir(tmp_path, monkeypatch):
 	assert pip.get_forms_dir("spring_2026").is_dir()
 
 
-def test_auto_import_refuses_overwrite(tmp_path, monkeypatch):
+def _form_csv_text(rows: list) -> str:
+	# Minimal header that resolve_meta_columns recognizes for both
+	# Student ID and timestamp.
+	header = "Timestamp,Email Address,First Name,Last Name,Student ID\n"
+	body = "".join(rows)
+	return header + body
+
+
+def _row(student_id: str, timestamp: str, first: str = "Pat",
+		last: str = "Roe", email: str = "pat@x") -> str:
+	return f"{timestamp},{email},{first},{last},{student_id}\n"
+
+
+def test_auto_import_refuses_overwrite_on_real_conflict(tmp_path, monkeypatch):
 	_install_fake_repo_root(monkeypatch, tmp_path)
 	_make_term_skeleton(tmp_path, "spring_2026")
-	# Same filename present at root and in canonical forms dir.
-	_drop_root_csv(tmp_path, 4, label="Active_Site")
-	_drop_canonical_csv(tmp_path, "spring_2026", 4, label="Active_Site")
+	# Same key on both sides, but the row content differs (changed
+	# cell). This is a real conflict; the comparator must raise.
+	src = tmp_path / "BCHM_Prot_Img_04-Active_Site.csv"
+	dst = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_04-Active_Site.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	dst.write_text(
+		_form_csv_text([_row("900000001", "2026/04/16 1:00:00 PM EST")]),
+		encoding="ascii",
+	)
+	src.write_text(
+		_form_csv_text([_row("900000001", "2026/04/16 1:00:00 PM EST",
+			first="Patty")]),
+		encoding="ascii",
+	)
 	with pytest.raises(FileExistsError) as excinfo:
 		sg.auto_import_repo_root_csvs("spring_2026")
-	assert "destination already exists" in str(excinfo.value)
+	assert "changed row: 900000001" in str(excinfo.value)
 
 
 def test_auto_import_ignores_unrelated_root_files(tmp_path, monkeypatch):
@@ -130,8 +159,16 @@ def test_no_duplicates_when_unique(tmp_path, monkeypatch):
 
 def test_status_row_for_complete_image(tmp_path, monkeypatch):
 	_install_fake_repo_root(monkeypatch, tmp_path)
-	_make_term_skeleton(tmp_path, "spring_2026")
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
 	_drop_canonical_csv(tmp_path, "spring_2026", 1)
+	# Roster.csv is now the source of expected Student IDs for the email
+	# step, so it must list the student that the email log marks as sent.
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n"
+		"Alice,Aaa,alice,900000001,\n",
+		encoding="ascii",
+	)
 	# New layout: per-image folder with raw/ and output files
 	image_dir = pip.get_term_image_dir("spring_2026", 1)
 	image_dir.mkdir(parents=True, exist_ok=True)
@@ -143,7 +180,8 @@ def test_status_row_for_complete_image(tmp_path, monkeypatch):
 	(image_dir / "output-protein_image_01.csv").write_text("", encoding="ascii")
 	(image_dir / "blackboard_upload-protein_image_01.csv").write_text(
 		"", encoding="ascii")
-	# Graded YAML + email log marking the only expected student as sent.
+	# Graded YAML still required by the grade step's "OK" gate; the email
+	# step now reads the roster instead of this file for expected IDs.
 	import yaml as _yaml
 	import protein_image_grader.email_log as _email_log
 	graded_yaml = image_dir / "output-protein_image_01.yml"
@@ -202,6 +240,37 @@ def test_status_row_next_step_progression():
 	# Everything done.
 	assert sg.compute_next_step("OK", "OK", "OK", "OK",
 		emailed_status="OK") == "done"
+
+
+# ---- emailed-status closure against roster --------------------------------
+
+def test_compute_emailed_status_closes_against_roster(tmp_path, monkeypatch):
+	# The Emailed column closes "OK" only when every roster Student ID has a
+	# closing status (sent or no_submission_sent). A submitter-only "sent"
+	# pass therefore stays PARTIAL until non-submitters are also closed.
+	import protein_image_grader.email_log as _email_log
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n"
+		"Alice,Aaa,alice,900000001,\n"
+		"Bob,Bbb,bob,900000002,\n",
+		encoding="ascii",
+	)
+	# No log at all -> MISSING.
+	assert sg.compute_emailed_status("spring_2026", 1, "OK") == "MISSING"
+	# Only one roster student has a closing cell -> PARTIAL.
+	data = {}
+	_email_log.set_status(data, "900000001", 1, "sent", "t",
+		"alice", "alice@mail.roosevelt.edu")
+	_email_log.save("spring_2026", data)
+	assert sg.compute_emailed_status("spring_2026", 1, "OK") == "PARTIAL"
+	# Closing the second student via no_submission_sent flips the cell to OK.
+	_email_log.set_status(data, "900000002", 1, "no_submission_sent", "t",
+		"bob", "bob@mail.roosevelt.edu")
+	_email_log.save("spring_2026", data)
+	assert sg.compute_emailed_status("spring_2026", 1, "OK") == "OK"
 
 
 # ---- command construction -------------------------------------------------
@@ -286,3 +355,215 @@ def test_require_resources_forms_missing_errors(tmp_path, monkeypatch):
 	_make_term_skeleton(tmp_path, "spring_2026", with_forms=False)
 	with pytest.raises(FileNotFoundError):
 		sg.require_resources("spring_2026", "download")
+
+
+# ---- content-aware import collisions --------------------------------------
+
+def test_auto_import_accepts_identical_collision(tmp_path, monkeypatch, capsys):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	_make_term_skeleton(tmp_path, "spring_2026")
+	src = tmp_path / "BCHM_Prot_Img_04-Active_Site.csv"
+	dst = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_04-Active_Site.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	body = _form_csv_text([_row("900000001", "2026/04/16 1:00:00 PM EST")])
+	src.write_text(body, encoding="ascii")
+	dst.write_text(body, encoding="ascii")
+	moves = sg.auto_import_repo_root_csvs("spring_2026")
+	assert len(moves) == 1
+	assert moves[0][2] == "identical"
+	# Root copy was removed; canonical untouched.
+	assert not src.exists()
+	assert dst.is_file()
+	out = capsys.readouterr().out
+	assert "identical" in out
+
+
+def test_auto_import_accepts_superset_collision(tmp_path, monkeypatch, capsys):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	_make_term_skeleton(tmp_path, "spring_2026")
+	src = tmp_path / "BCHM_Prot_Img_04-Active_Site.csv"
+	dst = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_04-Active_Site.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	# Canonical already has 3 rows; root CSV has 5 (same 3 keys plus
+	# 2 new keys, in interleaved order to prove the comparator is
+	# keyed and not order-sensitive).
+	r1 = _row("900000001", "2026/04/16 1:00:00 PM EST")
+	r2 = _row("900000002", "2026/04/16 1:05:00 PM EST")
+	r3 = _row("900000003", "2026/04/16 1:10:00 PM EST")
+	new1 = _row("900000004", "2026/04/16 1:15:00 PM EST")
+	new2 = _row("900000005", "2026/04/16 1:20:00 PM EST")
+	dst.write_text(_form_csv_text([r1, r2, r3]), encoding="ascii")
+	# Interleave new rows among the originals.
+	src.write_text(
+		_form_csv_text([r1, new1, r2, new2, r3]),
+		encoding="ascii",
+	)
+	moves = sg.auto_import_repo_root_csvs("spring_2026")
+	assert len(moves) == 1
+	assert moves[0][2] == "replaced"
+	assert not src.exists()
+	# Canonical now matches the root CSV's contents: 5 data rows under
+	# one header. Parse with csv.reader so a future trailing-newline or
+	# line-ending change does not flap the assertion.
+	import csv as _csv
+	with open(dst, "r", encoding="ascii", newline="") as handle:
+		all_rows = list(_csv.reader(handle))
+	assert len(all_rows) == 6
+	out = capsys.readouterr().out
+	assert "superset" in out
+	assert "+2 rows" in out
+
+
+# ---- ungraded-row detection (PARTIAL) -------------------------------------
+
+def _form_csv_with_records(student_ids: list, base_ts: str) -> str:
+	rows = []
+	for i, sid in enumerate(student_ids):
+		ts = f"2026/04/16 1:{i:02d}:00 PM EST"
+		rows.append(_row(sid, ts))
+	return _form_csv_text(rows)
+
+
+def _output_csv_with_records(student_ids: list) -> str:
+	# Minimal output CSV: just a Student ID column (the only one
+	# count_graded_records reads).
+	header = "Student ID\n"
+	body = "".join(f"{sid}\n" for sid in student_ids)
+	return header + body
+
+
+def test_status_row_partial_when_form_has_more_records(tmp_path, monkeypatch):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	# Form CSV with 5 submitter rows; output CSV has only 3.
+	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_08-Membrane.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	form_csv.write_text(
+		_form_csv_with_records(
+			["900000001", "900000002", "900000003",
+				"900000004", "900000005"],
+			"PM",
+		),
+		encoding="ascii",
+	)
+	image_dir = pip.get_term_image_dir("spring_2026", 8)
+	image_dir.mkdir(parents=True, exist_ok=True)
+	(image_dir / "raw").mkdir()
+	(image_dir / "raw" / "x.jpg").write_text("", encoding="ascii")
+	(image_dir / "output-protein_image_08.csv").write_text(
+		_output_csv_with_records(["900000001", "900000002", "900000003"]),
+		encoding="ascii",
+	)
+	(image_dir / "blackboard_upload-protein_image_08.csv").write_text(
+		"", encoding="ascii")
+	# Roster present so compute_emailed_status doesn't short to MISSING.
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n",
+		encoding="ascii",
+	)
+	canonical_csvs = sg.find_canonical_form_csvs("spring_2026")
+	row = sg.build_status_row(8, "spring_2026", canonical_csvs)
+	assert row["form"] == "OK"
+	assert row["graded"] == "PARTIAL"
+	assert row["form_count"] == 5
+	assert row["graded_count"] == 3
+	assert row["next_step"] == "regrade"
+
+
+def test_compute_next_step_partial_routes_to_regrade():
+	# Use keyword args to avoid positional ambiguity between
+	# bb_status and emailed_status.
+	step = sg.compute_next_step(
+		form_status="OK",
+		downloaded_status="OK",
+		graded_status="PARTIAL",
+		bb_status="OK",
+		emailed_status="OK",
+	)
+	assert step == "regrade"
+
+
+def test_render_footer_warnings_lists_partial_image(tmp_path, monkeypatch):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	_make_term_skeleton(tmp_path, "spring_2026")
+	# Hand-built dashboard rows; render_footer_warnings should emit the
+	# count line for the PARTIAL image only.
+	rows = []
+	for n in sg.EXPECTED_IMAGE_NUMBERS:
+		rows.append({
+			"image": f"{n:02d}",
+			"form": "OK",
+			"downloaded": "OK",
+			"graded": "OK",
+			"emailed": "OK",
+			"bb_upload": "OK",
+			"next_step": "done",
+			"form_count": None,
+			"graded_count": None,
+		})
+	# Look up the row by image label so the test does not depend on
+	# the position of image 08 inside EXPECTED_IMAGE_NUMBERS.
+	target = next(r for r in rows if r["image"] == "08")
+	target["graded"] = "PARTIAL"
+	target["form_count"] = 41
+	target["graded_count"] = 9
+	output = sg.render_footer_warnings("spring_2026", rows=rows)
+	assert "image 08: 41 form records, 9 graded records" in output
+
+
+def test_render_footer_warnings_flags_stale_output(tmp_path, monkeypatch):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	_make_term_skeleton(tmp_path, "spring_2026")
+	rows = []
+	for n in sg.EXPECTED_IMAGE_NUMBERS:
+		rows.append({
+			"image": f"{n:02d}",
+			"form": "OK",
+			"downloaded": "OK",
+			"graded": "OK",
+			"emailed": "OK",
+			"bb_upload": "OK",
+			"next_step": "done",
+			"form_count": None,
+			"graded_count": None,
+		})
+	target = next(r for r in rows if r["image"] == "03")
+	target["form_count"] = 5
+	target["graded_count"] = 7
+	output = sg.render_footer_warnings("spring_2026", rows=rows)
+	assert "image 03: 7 graded records exceed 5 form records" in output
+
+
+def test_auto_select_step_routes_partial_to_regrade(tmp_path, monkeypatch):
+	# Plan WP-4 wiring: when build_status_row reports next_step="regrade"
+	# (the new PARTIAL routing path), auto_select_step must return the
+	# "regrade" step verb. Earlier coverage only tested compute_next_step.
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_08-Membrane.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	form_csv.write_text(
+		_form_csv_with_records(
+			["900000001", "900000002", "900000003"],
+			"PM",
+		),
+		encoding="ascii",
+	)
+	image_dir = pip.get_term_image_dir("spring_2026", 8)
+	image_dir.mkdir(parents=True, exist_ok=True)
+	(image_dir / "raw").mkdir()
+	(image_dir / "raw" / "x.jpg").write_text("", encoding="ascii")
+	(image_dir / "output-protein_image_08.csv").write_text(
+		_output_csv_with_records(["900000001"]),
+		encoding="ascii",
+	)
+	(image_dir / "blackboard_upload-protein_image_08.csv").write_text(
+		"", encoding="ascii")
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n",
+		encoding="ascii",
+	)
+	step = sg.auto_select_step("spring_2026", 8)
+	assert step == "regrade"

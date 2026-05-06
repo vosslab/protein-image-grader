@@ -11,8 +11,30 @@
 	- `source source_me.sh && python start_grading.py`
 - Grade:
 	- `source source_me.sh && python start_grading.py`
+	- The dashboard `Graded` column reports `PARTIAL` when the form
+	  CSV has more submitter records than the graded output. This
+	  typically happens after a re-downloaded form CSV adds late
+	  submissions; `start_grading.py` then auto-routes the next run
+	  to the `regrade` step so only the new rows are processed.
+- Re-import a form CSV:
+	- Drop the freshly-downloaded `BCHM_Prot_Img_NN-*.csv` at the
+	  repo root and run `start_grading.py`. If the canonical copy
+	  under `forms/` is byte-identical, the root copy is silently
+	  removed. If the new file is a strict superset (every shared
+	  `(Student ID, Timestamp)` row is byte-identical and the new
+	  file only adds rows), the canonical copy is replaced in place.
+	  Any other divergence (changed cell, removed row, header drift,
+	  duplicate key) raises `FileExistsError` with the specific
+	  reason so the operator can resolve it manually.
 - Send feedback:
 	- `source source_me.sh && python start_grading.py`
+	- The `email` step contacts every Student ID in
+	  `Protein_Images/semesters/<term>/roster.csv`. Submitters get the
+	  per-question feedback email; non-submitters get a brief "no
+	  submission received" notice. Both populations are tracked in
+	  `Protein_Images/semesters/<term>/email_log.yml`. The dashboard's
+	  `Emailed` column closes to `OK` only when every roster Student ID
+	  has status `sent` or `no_submission_sent` for the image.
 
 ## Inputs
 - Form CSVs:
