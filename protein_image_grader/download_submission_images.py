@@ -16,10 +16,11 @@ import rich.console
 import googleapiclient.errors
 
 # local repo modules
-import protein_image_grader.rmspaces
 import protein_image_grader.ruid_resolver as ruid_resolver
+import protein_image_grader.image_filename as image_filename
 import protein_image_grader.google_drive_image_utils as google_drive_image_utils
 import protein_image_grader.archive_paths as archive_paths
+import protein_image_grader.form_columns as form_columns
 import protein_image_grader.protein_images_path as protein_images_path
 import protein_image_grader.roster_matching as roster_matching
 
@@ -73,12 +74,10 @@ def parse_args():
 	return args
 
 
-# Form CSV column names. Hardcoded because the Google Form headers are
-# fixed per semester; if a form ever changes wording, edit these here.
-COL_STUDENT_ID = 'Enter your RUID'
-COL_FIRST_NAME = 'Enter your first name'
-COL_LAST_NAME = 'Enter your last name'
-COL_USERNAME = 'Username'
+# Form CSV identity columns are resolved at runtime by
+# form_columns.resolve_meta_columns. To add or change recognized
+# header variants (e.g. accept "Net ID" as a Username column), edit
+# STANDARD_META_COLUMNS in protein_image_grader/form_columns.py.
 
 #============================================
 # Canonical layout for downloaded images:
@@ -173,7 +172,7 @@ def resolve_image_dir(csvfile: str, output_dir_override: str | None,
 
 #============================================
 def get_image_html_tag(image_url: str, ruid: int, args, image_dir: str,
-		raw_dir: str, archive_root: str, image_hashes: dict, hashes_changed: list) -> str:
+		image_raw_dir: str, archive_root: str, image_hashes: dict, hashes_changed: list) -> str:
 	"""
 	Download image from Google Drive, save to raw/trim dirs, archive, hash, and return HTML tag.
 
@@ -182,7 +181,7 @@ def get_image_html_tag(image_url: str, ruid: int, args, image_dir: str,
 		ruid: Record ID for naming
 		args: Parsed arguments
 		image_dir: Per-image working directory
-		raw_dir: raw/ subdirectory path
+		image_raw_dir: raw/ subdirectory path
 		archive_root: Archive root for the image (image_bank/<term>/<image_dir>)
 		image_hashes: Hash dict to update
 		hashes_changed: Mutable list to track changes
@@ -196,7 +195,7 @@ def get_image_html_tag(image_url: str, ruid: int, args, image_dir: str,
 		return ''
 
 	filename = format_filename(original_filename, ruid, args)
-	raw_path = os.path.abspath(os.path.join(raw_dir, filename))
+	raw_path = os.path.abspath(os.path.join(image_raw_dir, filename))
 	if not os.path.exists(raw_path):
 		was_saved = download_and_save_image(image_data, raw_path)
 		if not was_saved:
@@ -270,22 +269,13 @@ def format_filename(original_filename: str, ruid: int, args) -> str:
 	"""
 	Clean and normalize the filename for saving.
 
-	Args:
-		original_filename: Original filename
-		ruid: Record ID
-		args: Parsed arguments
-
-	Returns:
-		str: Normalized and extended filename
+	Thin wrapper around `image_filename.build_raw_image_filename` so the
+	canonical shape lives in one module that both downloader and grader
+	import. See `protein_image_grader/image_filename.py`.
 	"""
-	filename = original_filename.lower()
-	basename = os.path.splitext(filename)[0]
-	basename = protein_image_grader.rmspaces.cleanName(basename)
-	extension = os.path.splitext(filename)[-1]
-	filename = f"{ruid}-protein{args.image_number:02d}-{basename}{extension}"
-	if not filename.endswith('.jpg') and not filename.endswith('.png'):
-		filename = os.path.splitext(filename)[0] + '.jpg'
-	return filename
+	return image_filename.build_raw_image_filename(
+		ruid, args.image_number, original_filename
+	)
 
 #============================================
 def download_and_save_image(image_data, filepath: str) -> bool:
@@ -530,7 +520,7 @@ def _quarantine_row(quarantine_log_path: str, unresolved) -> None:
 
 #============================================
 def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: str,
-		raw_dir: str, archive_root: str, output_html: str, image_hashes: dict,
+		image_raw_dir: str, archive_root: str, output_html: str, image_hashes: dict,
 		hashes_changed: list, matcher, assigned_ruids: set):
 	"""
 	Generate an HTML file based on the CSV data.
@@ -547,10 +537,16 @@ def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: 
 	if args.image_number == 0:
 		args.image_number = extract_number_in_range(os.path.basename(csvfile))
 
-	col_student_id_idx = roster_matching.find_column_ci(header, COL_STUDENT_ID)
-	col_first_idx = roster_matching.find_column_ci(header, COL_FIRST_NAME)
-	col_last_idx = roster_matching.find_column_ci(header, COL_LAST_NAME)
-	col_username_idx = roster_matching.find_column_ci(header, COL_USERNAME)
+	# The downloader needs name/username; Student ID is preferred but
+	# missing-column rows fall back to _extract_form_ruid_from_row's
+	# 900/960 prefix scan over every cell, so leave Student ID optional.
+	standard_indices = form_columns.resolve_meta_columns(
+		header, required={"Username", "First Name", "Last Name"},
+	)
+	col_student_id_idx = standard_indices.get("Student ID")
+	col_first_idx = standard_indices["First Name"]
+	col_last_idx = standard_indices["Last Name"]
+	col_username_idx = standard_indices["Username"]
 
 	quarantine_log_path = os.path.join(
 		os.path.dirname(os.path.abspath(csvfile)) or ".",
@@ -641,7 +637,7 @@ def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: 
 					continue
 				elif item.startswith('http'):
 					img_html_tag = get_image_html_tag(
-						item, ruid, args, image_dir, raw_dir, archive_root, image_hashes, hashes_changed
+						item, ruid, args, image_dir, image_raw_dir, archive_root, image_hashes, hashes_changed
 					)
 					output.write(f"{img_html_tag}\n")
 				else:
@@ -781,10 +777,10 @@ def process_one_csv(csvfile: str, args, image_hashes: dict,
 		f"  image {args.image_number:02d} -> {image_dir}",
 		style="green")
 
-	# Set up raw_dir (always under image_dir for canonical layout).
-	raw_dir = os.path.join(image_dir, "raw")
-	if not os.path.isdir(raw_dir):
-		os.makedirs(raw_dir)
+	# Set up image_raw_dir (always under image_dir for canonical layout).
+	image_raw_dir = os.path.join(image_dir, "raw")
+	if not os.path.isdir(image_raw_dir):
+		os.makedirs(image_raw_dir)
 
 	# Archive is disabled by default when --output-dir is used; --archive-anyway
 	# re-enables it. Without --output-dir, archive sync is always on.
@@ -799,7 +795,7 @@ def process_one_csv(csvfile: str, args, image_hashes: dict,
 		image_dir, f"profiles_image_{args.image_number:02d}.html")
 	args.profiles_html = profiles_html
 
-	generate_html(csvfile, header, data_tree, args, image_dir, raw_dir,
+	generate_html(csvfile, header, data_tree, args, image_dir, image_raw_dir,
 		archive_root, profiles_html, image_hashes, hashes_changed,
 		matcher, assigned_ruids)
 	if open_browser:

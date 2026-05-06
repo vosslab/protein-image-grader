@@ -84,7 +84,7 @@ The Form RUID is preserved per row, but never as a filename. Specifically:
 
 ## See also
 
-- [INPUT_FORMATS.md](INPUT_FORMATS.md) - form CSV columns the matcher reads.
+- `protein_image_grader/form_columns.py` - keyword-set alias table (`STANDARD_META_COLUMNS`) that resolves the form CSV's identity columns (timestamp, Username, First Name, Last Name, Student ID) from the header row.
 - `protein_image_grader/roster_matching.py` - the generic fuzzy-matching engine (`RosterMatcher` + `match_submission`).
 - `protein_image_grader/ruid_resolver.py` - one function (`resolve_form_row_to_roster_row`) that wraps `RosterMatcher` with the project-specific shape: per-run duplicate guard and triage-grade `ResolvedStudent` / `UnresolvedStudent` return.
 - `protein_image_grader/student_id_protein.py` - grading orchestrator; calls `resolve_form_row_to_roster_row` inside `match_lists_and_add_student_ids`.

@@ -432,8 +432,8 @@ def run_step(term: str, image_number: int, step: str) -> int:
 		# downloads are kept as-is (no overwrite prompt) so re-runs do not
 		# re-fetch hundreds of images.
 		image_dir = protein_images_path.get_term_image_dir(term, image_number)
-		raw_dir = image_dir / "raw"
-		if not is_non_empty_dir(raw_dir):
+		image_raw_dir = image_dir / "raw"
+		if not is_non_empty_dir(image_raw_dir):
 			download_command = build_download_command(canonical_csv)
 			download_command_string = " ".join(download_command)
 			print(f"+ {download_command_string}")

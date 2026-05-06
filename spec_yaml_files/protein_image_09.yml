@@ -5,11 +5,6 @@ total points: 5
 strict background: true
 
 meta columns:
-  First Name: 3
-  Last Name: 4
-  Student ID: 5
-  email: 2
-  timestamp: 1
   image url: 6
   extra description: 11
 

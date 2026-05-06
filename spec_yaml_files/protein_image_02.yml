@@ -5,14 +5,9 @@ total points: 5
 strict background: true
 
 meta columns:
-  First Name: 3
-  Last Name: 4
-  Student ID: 5
-  email: 2
-  timestamp: 1
   image url: 6
 
-hide columns: [6, 9, 10, 11]
+#hide columns: [6, 9, 10, 11]
 
 deadline:
     due date: Feb 12, 2026

@@ -1,11 +1,24 @@
 
+# Standard Library
 import csv
+
+# PIP3 modules
 import yaml
+
+# local repo modules
+import protein_image_grader.form_columns as form_columns
 
 #==============
 def read_student_csv_data(input_csv: str, config: dict) -> list:
 	"""
 	Read student data from a CSV file and return a list of dictionaries for each student.
+
+	Standard identity columns (timestamp, Username, First Name,
+	Last Name, Student ID) are resolved from the CSV header row by
+	keyword-set matching via form_columns.resolve_meta_columns. The
+	per-image spec YAML's `meta columns:` map is consulted ONLY for
+	assignment-specific fields whose form headers genuinely vary per
+	image (image url, extra description).
 
 	Parameters
 	----------
@@ -20,14 +33,31 @@ def read_student_csv_data(input_csv: str, config: dict) -> list:
 		Returns a list of dictionaries, where each dictionary represents a student's information.
 
 	"""
-	# Retrieve metadata column information and hidden columns from the configuration
+	# `meta columns:` is optional in spec YAMLs that have only standard
+	# identity columns (those are resolved from the CSV header now).
 	meta_columns_dict = config.get("meta columns", {})
-	print(meta_columns_dict)
-	hide_columns_indices = config.get("hide columns", [])
-	print(hide_columns_indices)
 
-	# Get the list of questions to read from the CSV
-	csv_questions_list = config.get("csv_questions", {})
+	# Warn if a legacy YAML still carries the standard identity keys.
+	legacy_keys_present = sorted(
+		k for k in meta_columns_dict.keys() if k in form_columns.LEGACY_YAML_META_KEYS
+	)
+	if legacy_keys_present:
+		# One warning per file -- the operator does not need five lines per spec.
+		print(
+			"WARNING: ignoring legacy standard meta column keys in spec YAML: "
+			+ ", ".join(legacy_keys_present)
+			+ ". Standard identity columns are now resolved by header keywords; "
+			"remove these keys from spec_yaml_files/*.yml."
+		)
+
+	# Slim view of the YAML map: only the assignment-specific fields.
+	per_image_meta = {
+		k: v for k, v in meta_columns_dict.items()
+		if k not in form_columns.LEGACY_YAML_META_KEYS
+	}
+
+	# csv_questions is a list of dicts in the YAML; default to empty list.
+	csv_questions_list = config.get("csv_questions", [])
 
 	# Initialize a list to hold the student entries
 	student_tree = []
@@ -38,18 +68,26 @@ def read_student_csv_data(input_csv: str, config: dict) -> list:
 	# Open the CSV file and read its content
 	with open(input_csv, 'r') as f:
 		reader = csv.reader(f)
+		# Resolve the standard identity columns once we have the header row.
+		standard_indices = None
 		for row_list in reader:
 			# If header_list is None, this is the first row (header)
 			if header_list is None:
 				header_list = row_list
+				standard_indices = form_columns.resolve_meta_columns(header_list)
 				continue
 
 			# Initialize a dictionary to hold a single student's data
 			student_entry = {}
 
-			# Populate the metadata columns for the student
-			for meta_key, index in meta_columns_dict.items():
-				student_entry[meta_key] = row_list[index-1].strip()
+			# Populate standard identity columns by canonical key name.
+			for canonical_key, index in standard_indices.items():
+				student_entry[canonical_key] = row_list[index].strip()
+
+			# Populate any remaining per-image meta columns from YAML
+			# (1-based indices are still used here for compatibility).
+			for meta_key, index_one_based in per_image_meta.items():
+				student_entry[meta_key] = row_list[index_one_based - 1].strip()
 
 			# Populate the questions for the student
 			for csv_question_dict in csv_questions_list:

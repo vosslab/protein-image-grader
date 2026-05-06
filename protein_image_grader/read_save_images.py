@@ -10,7 +10,7 @@ import rich.style
 import rich.console
 
 # local repo modules
-import protein_image_grader.rmspaces
+import protein_image_grader.image_filename as image_filename
 import protein_image_grader.google_drive_image_utils as google_drive_image_utils
 import protein_image_grader.student_id_protein as student_id_protein
 import protein_image_grader.archive_paths as archive_paths
@@ -26,15 +26,14 @@ def get_image_data(student_entry: dict, params: dict):
 	"""Download or load an image from cache, ensuring consistency."""
 	global download_count
 
-	image_url = student_entry.get('image url')
-	if image_url is None:
-		raise ValueError("Image URL not found in student entry")
-	output_filename_prefix = (
-		f"{student_entry['Student ID']}-"
-		f"{student_entry['First Name'].lower().replace(' ', '_')}_"
-		f"{student_entry['Last Name'].lower().replace(' ', '_')}-"
+	image_url = student_entry['image url']
+	# Use the canonical filename shape shared with the downloader so the
+	# glob hits files saved by `download_submission_images`. The shape is
+	# <RUID>-protein<NN>-* in `params['image_raw_dir']`.
+	prefix_basename = image_filename.build_raw_image_prefix(
+		student_entry['Student ID'], params['image_number']
 	)
-	output_filename_prefix = os.path.join(params['image_folder'], output_filename_prefix)
+	output_filename_prefix = os.path.join(params['image_raw_dir'], prefix_basename)
 
 	file_search = glob.glob(output_filename_prefix+"*")
 	image_data = None
@@ -46,11 +45,13 @@ def get_image_data(student_entry: dict, params: dict):
 		image_data, original_filename = google_drive_image_utils.download_image(file_id)
 		download_count += 1
 		print(f"original_filename = {original_filename}")
-		filename = original_filename.lower()
-		basename = os.path.splitext(filename)[0]
-		basename = protein_image_grader.rmspaces.cleanName(basename)
-		extension = os.path.splitext(filename)[-1]
-		output_filename = f"{output_filename_prefix}{basename}{extension}"
+		# Build the saved name using the same helper the downloader uses,
+		# so a grader-only download produces a file the downloader's later
+		# run will also find via its own existence check.
+		saved_basename = image_filename.build_raw_image_filename(
+			student_entry['Student ID'], params['image_number'], original_filename
+		)
+		output_filename = os.path.join(params['image_raw_dir'], saved_basename)
 		print(f"output_filename = {output_filename}")
 
 	elif len(file_search) > 1:
@@ -117,38 +118,6 @@ def download_and_process_image(student_entry: dict, params: dict) -> dict:
 	})
 
 	return image_dict
-
-#============================================
-def generate_output_filename(student_entry: dict, filename: str, params: dict) -> str:
-	"""Generate a sanitized output filename for the student's image."""
-	# Convert filename to lowercase
-	filename = filename.lower()
-
-	# Raise an error if filename starts with "download_"
-	if filename.startswith("download_"):
-		raise ValueError
-
-	# Clean filename and extract extension
-	basename = os.path.splitext(filename)[0]
-	basename = protein_image_grader.rmspaces.cleanName(basename)
-	extension = os.path.splitext(filename)[-1]
-
-	# Construct the output filename
-	output_filename = (
-		f"{student_entry['Student ID']}-"
-		f"{student_entry['First Name'].replace(' ', '_')}_"
-		f"{student_entry['Last Name'].replace(' ', '_')}-"
-		f"{basename}{extension}"
-	)
-
-	# Ensure filename contains only allowed characters
-	goodchars = set('-._0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
-	output_filename = ''.join(c if c in goodchars else '_' for c in output_filename)
-
-	# Construct full file path
-	output_filename = os.path.join(params['image_folder'], output_filename)
-
-	return output_filename
 
 #============================================
 def save_image(image_dict: dict, output_filename: str):

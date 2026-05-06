@@ -2,6 +2,7 @@
 import os
 import glob
 import time
+import shutil
 import fnmatch
 import argparse
 from types import MappingProxyType
@@ -366,6 +367,46 @@ def parse_args() -> None:
 	args = parser.parse_args()
 	return args
 
+#============================================
+def seed_or_reseed_spec_yaml(template_yaml: str, config_yaml: str) -> str:
+	"""
+	Ensure the per-image spec YAML exists and is up to date.
+
+	Args:
+		template_yaml: Path to the canonical template under spec_yaml_files/.
+		config_yaml: Destination path inside the per-image folder.
+
+	Returns:
+		One of "seeded" (first-time copy), "reseeded" (template newer
+		than dst, dst overwritten), or "kept" (no action). The string
+		is also printed via the module console.
+
+	Raises:
+		ValueError: when neither the destination nor the template exist.
+	"""
+	if not os.path.isfile(config_yaml):
+		# First-time seed: no per-image copy exists yet for this term.
+		if not os.path.isfile(template_yaml):
+			raise ValueError(
+				f"Spec YAML not found in per-image folder ({config_yaml}) "
+				f"or spec_dir template ({template_yaml})."
+			)
+		shutil.copy2(template_yaml, config_yaml)
+		console.print(f"[green]seeded[/green] {config_yaml} from {template_yaml}")
+		return "seeded"
+	if os.path.isfile(template_yaml) and (
+		os.path.getmtime(template_yaml) > os.path.getmtime(config_yaml)
+	):
+		# Template is newer: reseed so schema fixes propagate without manual rm.
+		# Operator-edited per-image copies are overwritten only when the template
+		# has been touched after that copy was last written.
+		shutil.copy2(template_yaml, config_yaml)
+		console.print(f"[yellow]reseeded[/yellow] {config_yaml} from {template_yaml}")
+		return "reseeded"
+	return "kept"
+
+
+#============================================
 def parse_and_prepare() -> dict:
 	"""
 	Parse command-line arguments and prepare file paths.
@@ -384,12 +425,19 @@ def parse_and_prepare() -> dict:
 	forms_dir = protein_images_path.get_forms_dir(term)
 	roster_csv = str(protein_images_path.get_roster_csv(term))
 	image_dir = protein_images_path.get_term_image_dir(term, image_number)
-	raw_dir = image_dir / "raw"
-	if not raw_dir.is_dir():
-		raw_dir.mkdir(parents=True, exist_ok=True)
+	image_raw_dir = image_dir / "raw"
+	if not image_raw_dir.is_dir():
+		image_raw_dir.mkdir(parents=True, exist_ok=True)
 
 	# Construct file paths
 	config_yaml = str(protein_images_path.get_image_spec_yaml(term, image_number))
+	# Seed the per-image folder with the canonical spec YAML on first grade.
+	# spec_yaml_files/protein_image_NN.yml is the template; the per-image folder
+	# gets its own copy so tweaks per semester do not edit the template in place.
+	# When the template is newer than the seeded copy, reseed so schema fixes
+	# (such as the meta-columns refactor) propagate without manual rm.
+	template_yaml = os.path.join(spec_dir, f"protein_image_{image_number:02d}.yml")
+	seed_or_reseed_spec_yaml(template_yaml, config_yaml)
 	csv_pattern = f"BCHM_Prot_Img_{image_number:02d}-*.csv"
 	# Look in canonical forms/ folder for this term.
 	candidates = sorted(glob.glob(os.path.join(str(forms_dir), csv_pattern)))
@@ -415,7 +463,7 @@ def parse_and_prepare() -> dict:
 		"term": term,
 		"spec_dir": spec_dir,
 		"image_dir": str(image_dir),
-		"raw_dir": str(raw_dir),
+		"image_raw_dir": str(image_raw_dir),
 		"config_yaml": config_yaml,
 		"input_csv": input_csv,
 		"output_csv": output_csv,
@@ -452,7 +500,6 @@ def display_info(params: dict):
 	table.add_row("Grades CSV", params["grades_csv"])
 	table.add_row("Roster CSV", params["student_ids_csv"])
 	table.add_row("Image Hashes", params["image_hashes_yaml"])
-	table.add_row("Archive Session", params["archive_session_dir"])
 
 	console.print(table)
 	time.sleep(1)
@@ -614,7 +661,7 @@ def load_student_data(params: dict, read_only_config: dict) -> tuple:
 	student_id_protein.match_lists_and_add_student_ids(student_ids_tree, student_tree)
 
 	#back up matched students
-	match_yaml = os.path.join(params["folder"], "matched_students.yml")
+	match_yaml = os.path.join(params["image_dir"], "matched_students.yml")
 	if time.time() - t0 > 4:
 		file_io_protein.backup_tree_to_yaml(match_yaml, student_tree)
 
@@ -670,14 +717,14 @@ def process_data(student_tree: list, params: dict, read_only_config_dict: dict) 
 	console.print("\nDownloading and Reading Student Images", style=data_color)
 	read_save_images.read_and_save_student_images(student_tree, params)
 	# Save backup of the student_tree
-	download_save_yaml = os.path.join(params["folder"], "downloaded_images.yml")
+	download_save_yaml = os.path.join(params["image_dir"], "downloaded_images.yml")
 	if time.time() - t0 > 4:
 		file_io_protein.backup_tree_to_yaml(download_save_yaml, student_tree)
 
 	console.print("\nChecking Student Images for Duplicates", style=data_color)
 	duplicate_processing.check_duplicate_images(student_tree, params)
 	# Save backup of the student_tree
-	duplicate_check_save_yaml = os.path.join(params["folder"], "duplicate_check_save.yml")
+	duplicate_check_save_yaml = os.path.join(params["image_dir"], "duplicate_check_save.yml")
 	if time.time() - t0 > 4:
 		file_io_protein.backup_tree_to_yaml(duplicate_check_save_yaml, student_tree)
 
@@ -687,7 +734,7 @@ def process_data(student_tree: list, params: dict, read_only_config_dict: dict) 
 		timestamp_tools.timestamp_due_date(student_entry, read_only_config_dict)
 
 	# Save backup of the student_tree
-	preprocess_save_yaml = os.path.join(params["folder"], "preprocess_save.yml")
+	preprocess_save_yaml = os.path.join(params["image_dir"], "preprocess_save.yml")
 	if time.time() - t0 > 4:
 		file_io_protein.backup_tree_to_yaml(preprocess_save_yaml, student_tree)
 
@@ -705,13 +752,13 @@ def process_data(student_tree: list, params: dict, read_only_config_dict: dict) 
 		process_csv_question(student_tree, question_dict, accepted_answers)
 
 	# Save backup of the student_tree
-	postquestions_save_yaml = os.path.join(params["folder"], "post-questions_save.yml")
+	postquestions_save_yaml = os.path.join(params["image_dir"], "post-questions_save.yml")
 	if time.time() - t0 > 4:
 		file_io_protein.backup_tree_to_yaml(postquestions_save_yaml, student_tree)
 
 	# Generate HTML for visual grading if enabled
 	if params["args"].make_html is True:
-		profiles_html = os.path.join(params["folder"], "profiles.html")
+		profiles_html = os.path.join(params["image_dir"], "profiles.html")
 		download_submission_images.write_html_from_student_tree(student_tree, profiles_html)
 		download_submission_images.open_html_in_browser(profiles_html)
 
@@ -721,7 +768,7 @@ def process_data(student_tree: list, params: dict, read_only_config_dict: dict) 
 	proc_img.process_all_student_images()
 
 	# Save backup of the student_tree
-	postimages_save_yaml = os.path.join(params["folder"], "post-images_save.yml")
+	postimages_save_yaml = os.path.join(params["image_dir"], "post-images_save.yml")
 	if time.time() - t0 > 4:
 		file_io_protein.backup_tree_to_yaml(postimages_save_yaml, student_tree)
 

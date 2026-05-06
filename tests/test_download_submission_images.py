@@ -135,7 +135,7 @@ def test_find_canonical_form_csvs_skips_noncanonical(monkeypatch, tmp_path):
 def test_get_image_html_tag_trim_dual_write(monkeypatch, tmp_path):
 	"""
 	With args.trim=True, get_image_html_tag must:
-	  - save raw to <raw_dir>/<filename>
+	  - save raw to <image_raw_dir>/<filename>
 	  - save trim to <image_dir>/trim/<basename>-trim.jpg
 	  - archive both to <archive_root>/raw/ and <archive_root>/trim/
 	  - call update_image_hashes once per file (raw + trim)
@@ -148,8 +148,8 @@ def test_get_image_html_tag_trim_dual_write(monkeypatch, tmp_path):
 	monkeypatch.setattr(pip, "get_image_bank_dir", lambda: image_bank_dir)
 
 	image_dir = tmp_path / "BCHM_Prot_Img_01_Topic"
-	raw_dir = image_dir / "raw"
-	raw_dir.mkdir(parents=True)
+	image_raw_dir = image_dir / "raw"
+	image_raw_dir.mkdir(parents=True)
 	archive_root = image_bank_dir / "spring_2026" / "BCHM_Prot_Img_01_Topic"
 
 	# Mock download: return a non-None marker so the path proceeds.
@@ -199,12 +199,12 @@ def test_get_image_html_tag_trim_dual_write(monkeypatch, tmp_path):
 
 	tag = dsi.get_image_html_tag(
 		"https://drive.google.com/file/d/fake/view",
-		900111222, args, str(image_dir), str(raw_dir),
+		900111222, args, str(image_dir), str(image_raw_dir),
 		str(archive_root), image_hashes, hashes_changed,
 	)
 
 	# Raw landed under raw/
-	raw_files = list(raw_dir.iterdir())
+	raw_files = list(image_raw_dir.iterdir())
 	assert len(raw_files) == 1
 	assert raw_files[0].suffix == ".png"
 
@@ -246,14 +246,16 @@ def test_process_one_csv_creates_raw_and_archive_dirs(monkeypatch, tmp_path):
 
 	# Write CSV header and empty row to avoid actual downloads.
 	csv_path.write_text(
-		"First Name,Last Name,Image\nJohn,Doe,\n",
+		"Timestamp,Username,Enter your first name,Enter your last name,"
+		"Enter your RUID,Image\n"
+		"2026/01/01 09:00:00,jdoe,John,Doe,900000001,\n",
 		encoding="utf-8"
 	)
 
-	# Verify raw_dir is created
+	# Verify image_raw_dir is created
 	image_dir = tmp_path / pip.PROTEIN_IMAGES_NAME / pip.SEMESTERS_SUBDIR / \
 		"spring_2026" / "BCHM_Prot_Img_01_Topic"
-	raw_dir = image_dir / "raw"
+	image_raw_dir = image_dir / "raw"
 
 	# Mock get_image_bank_dir to return a test path
 	image_bank_dir = tmp_path / pip.PROTEIN_IMAGES_NAME / "image_bank"
@@ -268,7 +270,7 @@ def test_process_one_csv_creates_raw_and_archive_dirs(monkeypatch, tmp_path):
 			archive_root, html, hashes, changed, matcher, assigned_ruids):
 		called_with.append({
 			"image_dir": img_dir,
-			"raw_dir": raw,
+			"image_raw_dir": raw,
 			"archive_root": archive_root,
 			"matcher": matcher,
 			"assigned_ruids": assigned_ruids,
@@ -286,13 +288,13 @@ def test_process_one_csv_creates_raw_and_archive_dirs(monkeypatch, tmp_path):
 	dsi.process_one_csv(str(csv_path), args, image_hashes, hashes_changed,
 		False, matcher, assigned)
 
-	# Verify raw_dir was created
-	assert raw_dir.is_dir(), f"raw_dir not created: {raw_dir}"
+	# Verify image_raw_dir was created
+	assert image_raw_dir.is_dir(), f"image_raw_dir not created: {image_raw_dir}"
 
 	# Verify archive_root structure is correct
 	assert len(called_with) == 1
 	call = called_with[0]
-	assert call["raw_dir"] == str(raw_dir)
+	assert call["image_raw_dir"] == str(image_raw_dir)
 	# Archive root should be under image_bank/spring_2026/BCHM_Prot_Img_01_Topic
 	assert call["archive_root"] is not None, "archive_root should not be None"
 	assert "image_bank" in call["archive_root"]
@@ -354,8 +356,8 @@ def test_generate_html_uses_roster_ruid(monkeypatch, tmp_path):
 	monkeypatch.setattr(pip, "get_image_bank_dir", lambda: image_bank_dir)
 
 	image_dir = tmp_path / "BCHM_Prot_Img_01_Topic"
-	raw_dir = image_dir / "raw"
-	raw_dir.mkdir(parents=True)
+	image_raw_dir = image_dir / "raw"
+	image_raw_dir.mkdir(parents=True)
 	# Place archive root inside image_bank/ so normalize_hash_path resolves.
 	archive_root = image_bank_dir / "spring_2026" / "BCHM_Prot_Img_01_Topic"
 
@@ -363,9 +365,9 @@ def test_generate_html_uses_roster_ruid(monkeypatch, tmp_path):
 	# under 900000002. Real matcher resolves via exact name match.
 	csv_path = tmp_path / "BCHM_Prot_Img_01-Topic.csv"
 	csv_path.write_text(
-		"Username,Enter your first name,Enter your last name,"
+		"Timestamp,Username,Enter your first name,Enter your last name,"
 		"Enter your RUID,Image\n"
-		"asmith,Alice,Smith,900000001,https://drive/x\n",
+		"2026/01/01 09:00:00,asmith,Alice,Smith,900000001,https://drive/x\n",
 		encoding="utf-8",
 	)
 	header, data_tree = dsi.read_csv(str(csv_path), -1)
@@ -387,7 +389,7 @@ def test_generate_html_uses_roster_ruid(monkeypatch, tmp_path):
 
 	dsi.generate_html(
 		str(csv_path), header, data_tree, args,
-		str(image_dir), str(raw_dir), str(archive_root),
+		str(image_dir), str(image_raw_dir), str(archive_root),
 		str(image_dir / "profiles.html"),
 		image_hashes, hashes_changed, matcher, assigned,
 	)
@@ -398,7 +400,7 @@ def test_generate_html_uses_roster_ruid(monkeypatch, tmp_path):
 	def _names(directory):
 		return [p.name for p in directory.iterdir()]
 
-	for directory in (raw_dir, image_dir / "trim",
+	for directory in (image_raw_dir, image_dir / "trim",
 			archive_root / "raw", archive_root / "trim"):
 		names = _names(directory)
 		assert names, f"no files written to {directory}"
@@ -421,14 +423,14 @@ def test_generate_html_quarantines_unresolved_row(monkeypatch, tmp_path):
 	_stub_image_io(monkeypatch, tmp_path)
 
 	image_dir = tmp_path / "BCHM_Prot_Img_01_Topic"
-	raw_dir = image_dir / "raw"
-	raw_dir.mkdir(parents=True)
+	image_raw_dir = image_dir / "raw"
+	image_raw_dir.mkdir(parents=True)
 
 	csv_path = tmp_path / "BCHM_Prot_Img_01-Topic.csv"
 	csv_path.write_text(
-		"Username,Enter your first name,Enter your last name,"
+		"Timestamp,Username,Enter your first name,Enter your last name,"
 		"Enter your RUID,Image\n"
-		"ghost,Ghost,Person,900999999,https://drive/x\n",
+		"2026/01/01 09:00:00,ghost,Ghost,Person,900999999,https://drive/x\n",
 		encoding="utf-8",
 	)
 	header, data_tree = dsi.read_csv(str(csv_path), -1)
@@ -441,7 +443,7 @@ def test_generate_html_quarantines_unresolved_row(monkeypatch, tmp_path):
 
 	dsi.generate_html(
 		str(csv_path), header, data_tree, args,
-		str(image_dir), str(raw_dir), None,
+		str(image_dir), str(image_raw_dir), None,
 		str(html_path), {"md5": {}, "phash": {}}, [False],
 		matcher, set(),
 	)
@@ -449,7 +451,7 @@ def test_generate_html_quarantines_unresolved_row(monkeypatch, tmp_path):
 	# No image was saved under the Form RUID (or under any RUID) for
 	# the quarantined row. Property assertion: nothing in raw/ carries
 	# the typed Form RUID, and no trim/ subdir was created.
-	for p in raw_dir.iterdir():
+	for p in image_raw_dir.iterdir():
 		assert "900999999" not in p.name, p.name
 	assert not (image_dir / "trim").exists()
 
@@ -476,15 +478,15 @@ def test_generate_html_raises_on_same_csv_duplicate(monkeypatch, tmp_path):
 	_stub_image_io(monkeypatch, tmp_path)
 
 	image_dir = tmp_path / "BCHM_Prot_Img_01_Topic"
-	raw_dir = image_dir / "raw"
-	raw_dir.mkdir(parents=True)
+	image_raw_dir = image_dir / "raw"
+	image_raw_dir.mkdir(parents=True)
 
 	csv_path = tmp_path / "BCHM_Prot_Img_01-Topic.csv"
 	csv_path.write_text(
-		"Username,Enter your first name,Enter your last name,"
+		"Timestamp,Username,Enter your first name,Enter your last name,"
 		"Enter your RUID,Image\n"
-		"asmith,Alice,Smith,900000002,https://drive/x\n"
-		"asmith,Alice,Smith,900000002,https://drive/y\n",
+		"2026/01/01 09:00:00,asmith,Alice,Smith,900000002,https://drive/x\n"
+		"2026/01/01 09:05:00,asmith,Alice,Smith,900000002,https://drive/y\n",
 		encoding="utf-8",
 	)
 	header, data_tree = dsi.read_csv(str(csv_path), -1)
@@ -505,7 +507,7 @@ def test_generate_html_raises_on_same_csv_duplicate(monkeypatch, tmp_path):
 	with pytest.raises(RuntimeError, match="Duplicate roster match"):
 		dsi.generate_html(
 			str(csv_path), header, data_tree, args,
-			str(image_dir), str(raw_dir), None,
+			str(image_dir), str(image_raw_dir), None,
 			str(html_path), {"md5": {}, "phash": {}}, [False],
 			matcher, set(),
 		)
@@ -521,15 +523,15 @@ def test_generate_html_resolver_called_per_row(monkeypatch, tmp_path):
 	_stub_image_io(monkeypatch, tmp_path)
 
 	image_dir = tmp_path / "BCHM_Prot_Img_01_Topic"
-	raw_dir = image_dir / "raw"
-	raw_dir.mkdir(parents=True)
+	image_raw_dir = image_dir / "raw"
+	image_raw_dir.mkdir(parents=True)
 
 	csv_path = tmp_path / "BCHM_Prot_Img_01-Topic.csv"
 	csv_path.write_text(
-		"Username,Enter your first name,Enter your last name,"
+		"Timestamp,Username,Enter your first name,Enter your last name,"
 		"Enter your RUID,Image\n"
-		"asmith,Alice,Smith,900000001,https://drive/x\n"
-		"ghost,Ghost,Person,900999999,https://drive/y\n",
+		"2026/01/01 09:00:00,asmith,Alice,Smith,900000001,https://drive/x\n"
+		"2026/01/01 09:05:00,ghost,Ghost,Person,900999999,https://drive/y\n",
 		encoding="utf-8",
 	)
 	header, data_tree = dsi.read_csv(str(csv_path), -1)
@@ -557,7 +559,7 @@ def test_generate_html_resolver_called_per_row(monkeypatch, tmp_path):
 
 	dsi.generate_html(
 		str(csv_path), header, data_tree, _args(image_number=1),
-		str(image_dir), str(raw_dir), None,
+		str(image_dir), str(image_raw_dir), None,
 		str(image_dir / "profiles.html"),
 		{"md5": {}, "phash": {}}, [False], matcher, set(),
 	)
@@ -565,7 +567,7 @@ def test_generate_html_resolver_called_per_row(monkeypatch, tmp_path):
 	assert call_count[0] == 2
 	# The resolved row produced exactly one saved file under the Roster
 	# RUID; the quarantined row produced none.
-	saved = [p.name for p in raw_dir.iterdir()]
+	saved = [p.name for p in image_raw_dir.iterdir()]
 	assert any(name.startswith("900000002-") for name in saved), saved
 	assert not any("900999999" in name for name in saved), saved
 
@@ -580,8 +582,8 @@ def test_extract_form_ruid_falls_back_when_id_column_missing(monkeypatch, tmp_pa
 	_stub_image_io(monkeypatch, tmp_path)
 
 	image_dir = tmp_path / "BCHM_Prot_Img_01_Topic"
-	raw_dir = image_dir / "raw"
-	raw_dir.mkdir(parents=True)
+	image_raw_dir = image_dir / "raw"
+	image_raw_dir.mkdir(parents=True)
 
 	# CSV with no "Enter your RUID" column: resolver gets typed via the
 	# fallback that scans every cell for a 900/960 prefix.
@@ -605,20 +607,21 @@ def test_extract_form_ruid_falls_back_when_id_column_missing(monkeypatch, tmp_pa
 
 	dsi.generate_html(
 		str(csv_path), header, data_tree, _args(image_number=1),
-		str(image_dir), str(raw_dir), None,
+		str(image_dir), str(image_raw_dir), None,
 		str(image_dir / "profiles.html"),
 		{"md5": {}, "phash": {}}, [False], matcher, set(),
 	)
 
 	# Saved file uses the Roster RUID; the typed 900000001 from the
 	# unlabeled "Misc" column was correctly picked up by the fallback.
-	saved = [p.name for p in raw_dir.iterdir()]
+	saved = [p.name for p in image_raw_dir.iterdir()]
 	assert any(name.startswith("900000002-") for name in saved), saved
 
 
 def test_header_lookup_is_case_insensitive(monkeypatch, tmp_path):
 	"""
-	The header lookup uses `roster_matching.find_column_ci`, so a CSV
+	The header lookup uses `form_columns.resolve_meta_columns`, which
+	normalizes case and whitespace before token-set matching. A CSV
 	with all-lowercase or mixed-case header names must still resolve
 	correctly. Regression guard: a case-sensitive change would silently
 	fall back to the 900/960 prefix scan and could mask the bug.
@@ -627,8 +630,8 @@ def test_header_lookup_is_case_insensitive(monkeypatch, tmp_path):
 	_stub_image_io(monkeypatch, tmp_path)
 
 	image_dir = tmp_path / "BCHM_Prot_Img_01_Topic"
-	raw_dir = image_dir / "raw"
-	raw_dir.mkdir(parents=True)
+	image_raw_dir = image_dir / "raw"
+	image_raw_dir.mkdir(parents=True)
 
 	# All-lowercase headers; resolver must still extract the typed RUID
 	# from the labeled column, not stumble onto the URL fragment.
@@ -653,12 +656,12 @@ def test_header_lookup_is_case_insensitive(monkeypatch, tmp_path):
 
 	dsi.generate_html(
 		str(csv_path), header, data_tree, _args(image_number=1),
-		str(image_dir), str(raw_dir), None,
+		str(image_dir), str(image_raw_dir), None,
 		str(image_dir / "profiles.html"),
 		{"md5": {}, "phash": {}}, [False], matcher, set(),
 	)
 
-	saved = [p.name for p in raw_dir.iterdir()]
+	saved = [p.name for p in image_raw_dir.iterdir()]
 	assert any(name.startswith("900000002-") for name in saved), saved
 
 
@@ -671,15 +674,15 @@ def test_quarantine_log_appends_multiple_rows(monkeypatch, tmp_path):
 	_stub_image_io(monkeypatch, tmp_path)
 
 	image_dir = tmp_path / "BCHM_Prot_Img_01_Topic"
-	raw_dir = image_dir / "raw"
-	raw_dir.mkdir(parents=True)
+	image_raw_dir = image_dir / "raw"
+	image_raw_dir.mkdir(parents=True)
 
 	csv_path = tmp_path / "BCHM_Prot_Img_01-Topic.csv"
 	csv_path.write_text(
-		"Username,Enter your first name,Enter your last name,"
+		"Timestamp,Username,Enter your first name,Enter your last name,"
 		"Enter your RUID,Image\n"
-		"ghost1,Ghost,Person,900111111,https://drive/x\n"
-		"ghost2,Phantom,Spectre,900222222,https://drive/y\n",
+		"2026/01/01 09:00:00,ghost1,Ghost,Person,900111111,https://drive/x\n"
+		"2026/01/01 09:05:00,ghost2,Phantom,Spectre,900222222,https://drive/y\n",
 		encoding="utf-8",
 	)
 	header, data_tree = dsi.read_csv(str(csv_path), -1)
@@ -689,7 +692,7 @@ def test_quarantine_log_appends_multiple_rows(monkeypatch, tmp_path):
 
 	dsi.generate_html(
 		str(csv_path), header, data_tree, _args(image_number=1),
-		str(image_dir), str(raw_dir), None,
+		str(image_dir), str(image_raw_dir), None,
 		str(image_dir / "profiles.html"),
 		{"md5": {}, "phash": {}}, [False], matcher, set(),
 	)

@@ -136,9 +136,9 @@ def test_status_row_for_complete_image(tmp_path, monkeypatch):
 	image_dir = pip.get_term_image_dir("spring_2026", 1)
 	image_dir.mkdir(parents=True, exist_ok=True)
 	# Create raw/ subdirectory with a fake image
-	raw_dir = image_dir / "raw"
-	raw_dir.mkdir(exist_ok=True)
-	(raw_dir / "fake.jpg").write_text("", encoding="ascii")
+	image_raw_dir = image_dir / "raw"
+	image_raw_dir.mkdir(exist_ok=True)
+	(image_raw_dir / "fake.jpg").write_text("", encoding="ascii")
 	# Create output files in the per-image folder
 	(image_dir / "output-protein_image_01.csv").write_text("", encoding="ascii")
 	(image_dir / "blackboard_upload-protein_image_01.csv").write_text(
