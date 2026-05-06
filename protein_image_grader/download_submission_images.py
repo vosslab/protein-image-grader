@@ -584,6 +584,18 @@ def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: 
 			)
 
 			if isinstance(result, ruid_resolver.UnresolvedStudent):
+				# Same-CSV duplicates are operator-fix problems (one student
+				# submitted twice, or two form rows mis-resolved to the same
+				# roster row). Either case would silently overwrite a saved
+				# image on the second hit, so stop and force triage instead
+				# of burying the warning in quarantine.log.
+				if result.reason == "duplicate":
+					raise RuntimeError(
+						f"Duplicate roster match in {csvfile}: "
+						f"form_ruid={form_ruid!r} name={first_name!r} {last_name!r} "
+						"resolved to a Roster RUID already claimed earlier in this CSV. "
+						"Edit the form CSV to remove the redundant row and re-run."
+					)
 				console.print(
 					f"quarantine: form_ruid={form_ruid!r} "
 					f"name={first_name!r} {last_name!r} "
@@ -747,8 +759,10 @@ def process_one_csv(csvfile: str, args, image_hashes: dict,
 	values; the bulk loop resets these between iterations.
 
 	`matcher` is a shared `roster_matching.RosterMatcher` constructed by
-	main(); `assigned_ruids` is the cross-CSV duplicate guard. Per-row
-	Form-RUID -> Roster-RUID resolution happens inside generate_html.
+	main(); `assigned_ruids` is the per-CSV duplicate guard (main()
+	resets it for each CSV, since each assignment is independent).
+	Per-row Form-RUID -> Roster-RUID resolution happens inside
+	generate_html.
 	"""
 	header, data_tree = read_csv(csvfile, args.maxstudents)
 
@@ -813,19 +827,21 @@ def main():
 	open_browser = len(csv_paths) == 1
 
 	# Build the matcher once per run (the build is expensive due to
-	# roster indexing) and share `assigned_ruids` across all CSVs so a
-	# Form RUID that resolves to a Roster RUID in one CSV cannot
-	# silently re-resolve to the same student in a later CSV.
+	# roster indexing). `assigned_ruids` is reset per CSV: each
+	# assignment is independent, so the same student appearing in
+	# CSV 01 and CSV 02 is normal (one submission per assignment),
+	# not a duplicate. Duplicate detection only catches two form rows
+	# inside the same CSV resolving to the same Roster RUID.
 	# Non-interactive: the downloader quarantines on miss instead of
 	# prompting.
 	term = protein_images_path.get_active_term(args.term)
 	roster = roster_matching.load_roster(
 		str(protein_images_path.get_roster_csv(term)))
 	matcher = roster_matching.RosterMatcher(roster=roster, interactive=False)
-	assigned_ruids: set = set()
 
 	for csv_path in csv_paths:
 		console.print(f"=== {csv_path}", style="bold cyan")
+		assigned_ruids: set = set()
 		process_one_csv(str(csv_path), args, image_hashes, hashes_changed,
 			open_browser, matcher, assigned_ruids)
 

@@ -465,6 +465,52 @@ def test_generate_html_quarantines_unresolved_row(monkeypatch, tmp_path):
 	assert "QUARANTINED" in html
 
 
+def test_generate_html_raises_on_same_csv_duplicate(monkeypatch, tmp_path):
+	"""
+	Two form rows in the same CSV resolving to the same Roster RUID
+	must raise RuntimeError immediately rather than silently
+	overwriting the first student's saved image. Operator must edit
+	the CSV and re-run.
+	"""
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	_stub_image_io(monkeypatch, tmp_path)
+
+	image_dir = tmp_path / "BCHM_Prot_Img_01_Topic"
+	raw_dir = image_dir / "raw"
+	raw_dir.mkdir(parents=True)
+
+	csv_path = tmp_path / "BCHM_Prot_Img_01-Topic.csv"
+	csv_path.write_text(
+		"Username,Enter your first name,Enter your last name,"
+		"Enter your RUID,Image\n"
+		"asmith,Alice,Smith,900000002,https://drive/x\n"
+		"asmith,Alice,Smith,900000002,https://drive/y\n",
+		encoding="utf-8",
+	)
+	header, data_tree = dsi.read_csv(str(csv_path), -1)
+
+	import protein_image_grader.roster_matching as rm
+	first_n = rm.normalize_name_text("Alice")
+	last_n = rm.normalize_name_text("Smith")
+	matcher = rm.RosterMatcher(roster={900000002: {
+		"student_id": 900000002,
+		"first_name": first_n, "last_name": last_n,
+		"username": rm.normalize_username("asmith"), "alias": "",
+		"full_name": (first_n + " " + last_n).strip(),
+	}}, interactive=False)
+	args = _args(image_number=1, trim=True)
+	html_path = image_dir / "profiles.html"
+
+	import pytest
+	with pytest.raises(RuntimeError, match="Duplicate roster match"):
+		dsi.generate_html(
+			str(csv_path), header, data_tree, args,
+			str(image_dir), str(raw_dir), None,
+			str(html_path), {"md5": {}, "phash": {}}, [False],
+			matcher, set(),
+		)
+
+
 def test_generate_html_resolver_called_per_row(monkeypatch, tmp_path):
 	"""
 	Resolver is invoked once per data row regardless of resolution outcome.
@@ -655,12 +701,14 @@ def test_quarantine_log_appends_multiple_rows(monkeypatch, tmp_path):
 	assert "form_ruid='900222222'" in contents
 
 
-def test_assigned_ruids_shared_across_csvs_in_one_run(monkeypatch, tmp_path):
+def test_assigned_ruids_reset_per_csv_in_one_run(monkeypatch, tmp_path):
 	"""
-	When `--all` runs multiple CSVs, the same `assigned_ruids` set is
-	threaded through every `process_one_csv` call, so a Form RUID
-	resolved in CSV 1 cannot silently re-resolve to the same student
-	in CSV 2 (the second occurrence becomes a duplicate quarantine).
+	Each assignment CSV is independent: a student legitimately
+	submits one image per assignment, so the same Roster RUID
+	appearing in CSV 01 and CSV 02 is normal and must NOT be
+	flagged as a duplicate. main() resets `assigned_ruids` for
+	each CSV; this test guards that policy by simulating two
+	successive per-CSV resolver calls with a fresh set each time.
 	"""
 	_install_fake_repo_root(monkeypatch, tmp_path)
 	_stub_image_io(monkeypatch, tmp_path)
@@ -675,23 +723,24 @@ def test_assigned_ruids_shared_across_csvs_in_one_run(monkeypatch, tmp_path):
 		"username": rm.normalize_username("asmith"), "alias": "",
 		"full_name": (first_n + " " + last_n).strip(),
 	}}, interactive=False)
-	assigned: set = set()
 
-	# Resolve once -> ResolvedStudent and Roster RUID claimed.
+	# CSV 01: fresh per-CSV set. Resolves cleanly.
+	csv01_assigned: set = set()
 	first = rr.resolve_form_row_to_roster_row(
-		{"form_ruid": "900000001", "first_name": "Alice",
+		{"form_ruid": "900000002", "first_name": "Alice",
 			"last_name": "Smith", "username": "asmith"},
-		matcher, assigned,
+		matcher, csv01_assigned,
 	)
 	assert isinstance(first, rr.ResolvedStudent)
-	assert 900000002 in assigned
+	assert 900000002 in csv01_assigned
 
-	# A second CSV row, different typed Form RUID, same Roster row:
-	# must come back as duplicate because we share the same `assigned` set.
+	# CSV 02: per-CSV reset (what main() does). Same student
+	# resolves cleanly again -- not a duplicate.
+	csv02_assigned: set = set()
 	second = rr.resolve_form_row_to_roster_row(
-		{"form_ruid": "900999999", "first_name": "Alice",
+		{"form_ruid": "900000002", "first_name": "Alice",
 			"last_name": "Smith", "username": "asmith"},
-		matcher, assigned,
+		matcher, csv02_assigned,
 	)
-	assert isinstance(second, rr.UnresolvedStudent)
-	assert second.reason == "duplicate"
+	assert isinstance(second, rr.ResolvedStudent)
+	assert second.roster_ruid == 900000002
