@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-05-07
+
+### Additions and New Features
+- Add unified image storage layout helpers to `protein_images_path.py`: `IMAGE_HASHES_FILENAME`, `IMAGE_DIR_PREFIX`, `season_year_term(year, month)`, `get_term_image_dir(term, image_number)`, `get_image_hashes_yaml(repo_root)`, `get_image_spec_yaml(term, image_number)`. These replace the scattered submissions/grades/yaml helpers and canonical term label functions.
+- Add `_form_csv_to_image_dir_name` helper in `protein_images_path.py` to derive per-image folder names from form CSV basenames, replacing first `-` with `_` and sanitizing unsafe characters per spec.
+- Update `archive_paths.py` to new signatures: `make_image_bank_dir(term)` and `make_archive_assignment_dir(term, image_dir_name)` (image folder name sourced from `get_term_image_dir`). Deprecate `make_term_label`, `make_term_label_from_month`, `IMAGE_HASHES_NAME`, `get_image_hashes_path`, `make_assignment_archive_folder` in favor of `protein_images_path` helpers.
+- Update `start_grading.py` to new per-image folder layout: dashboard rows now check raw/ subdirectories for downloads and per-image folders for graded outputs. Remove the old `submissions_dir_for` and `grades_dir_for` helpers. `build_status_row`, `compute_emailed_status`, and `run_step` now use `get_term_image_dir` and path-join per-image folders instead of separate submissions/grades directories.
+- Update test fixtures for new unified layout: `test_download_output_dir.py` tests per-image folder paths; `test_send_feedback_email.py`, `test_start_grading.py` create minimal per-image folder structure instead of legacy submissions/grades.
+- Update `.gitignore`: remove archive-specific `image_hashes.yml` exception and replace with simple `/archive/` (whole directory) entry. `image_hashes.yml` at the repo root is now tracked (not gitignored).
+
+### Behavior or Interface Changes
+- Canonical term format everywhere is now `<season>_<year>` (lowercase) via `season_year_term`. Legacy `YYYY_NSeason` format from `make_term_label` is deprecated but still available for legacy YAML rewrites only.
+- Per-image working folders are now `Protein_Images/semesters/<term>/BCHM_Prot_Img_NN_<topic>/` with raw/ and trim/ subdirectories. Legacy `submissions/download_NN_raw/`, `grades/`, and `yaml/` subdirs are no longer used by the new code.
+- Spec YAML (`protein_image_NN.yml`) now lives inside the per-image folder, not in a separate `yaml/` directory. `get_image_spec_yaml` is the canonical lookup.
+
+### Fixes and Maintenance
+- Remove unused `protein_image_grader.rmspaces` import from `archive_paths.py`.
+- Fix CRITICAL archive syncing bug in `download_submission_images.py`: archive sync was completely removed instead of being redirected. The downloader now writes images to BOTH the working dir AND the canonical archive (image_bank/<term>/<image_dir>/), ensuring cross-year plagiarism detection via `image_hashes.yml` updates. Rewrote `trim_and_save_image` to accept `trim_dir` parameter (so trim images land in `<image_dir>/trim/`, not next to raw), updated `get_image_html_tag` to accept `raw_dir` and `archive_root` for proper archive syncing of both raw and trim images, updated `generate_html` signature to pass these parameters, and rewrote `process_one_csv` to compute `archive_root` and `raw_dir` before calling `generate_html`. Added `--archive-anyway` flag to re-enable archive sync with `--output-dir`.
+- All 435 tests passing; pyflakes clean on modified modules.
+
 ## 2026-05-06
 
 ### Additions and New Features

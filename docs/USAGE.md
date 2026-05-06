@@ -1,50 +1,52 @@
 # Usage
 
 ## Typical flow
-- Place assignment specs in `spec_yaml_files/`.
-- Place roster data in `current_students.csv` at the repo root.
+- Create `Protein_Images/` structure or symlink an existing one.
+- Place canonical form CSVs in `Protein_Images/semesters/<term>/forms/`.
+- Place roster data in `Protein_Images/semesters/<term>/roster.csv`.
 - Download and review images with HTML:
-	- `python3 download_submission_images.py -i <csv_file>`
+	- `source source_me.sh && python start_grading.py`
 - Grade:
-	- `python3 grade_protein_image.py -i <image_number>`
+	- `source source_me.sh && python start_grading.py`
 - Send feedback:
-	- `python3 send_feedback_email.py -i <image_number>`
+	- `source source_me.sh && python start_grading.py`
 
 ## Inputs
-- Assignment specs:
-	- `spec_yaml_files/protein_image_XX.yml`
-	- `spec_yaml_files/common_image_questions.yml` (shared image questions)
+- Form CSVs:
+	- `Protein_Images/semesters/<term>/forms/BCHM_Prot_Img_NN-<topic>.csv`
 - Roster:
-	- `current_students.csv`
+	- `Protein_Images/semesters/<term>/roster.csv`
 - Cheat detection database:
-	- `archive/image_hashes.yml`
+	- `image_hashes.yml` at repo root
 
 ## Outputs
+- Downloaded images (working):
+	- `Protein_Images/semesters/<term>/<image_dir>/raw/`
+	- `Protein_Images/semesters/<term>/<image_dir>/trim/` (with `--trim`)
+- Downloaded images (archived):
+	- `Protein_Images/image_bank/<term>/<image_dir>/raw/`
+	- `Protein_Images/image_bank/<term>/<image_dir>/trim/`
 - Grading outputs:
-	- `data/runs/IMAGE_XX/`
-- Downloaded images:
-	- `data/runs/DOWNLOAD_XX_year_YYYY/`
+	- `Protein_Images/semesters/<term>/<image_dir>/output-protein_image_NN.yml`
 - Visual grading HTML:
-	- `data/runs/IMAGE_XX/profiles.html`
+	- `Protein_Images/semesters/<term>/<image_dir>/profiles_image_NN.html`
 
 ## Archive behavior
-- Archive images are copied into `archive/<year_term>/ARCHIVE_IMAGES/`.
-- `archive/image_hashes.yml` is updated automatically as new images are processed.
-- Hash records are written as canonical repo-relative paths.
-- Legacy `ARCHIVE_IMAGES/...` records remain readable through a repo-root symlink or
-	`archive/legacy_import/ARCHIVE_IMAGES/...`.
+- Archive images are copied into `Protein_Images/image_bank/<term>/<image_dir>/{raw,trim}/` automatically.
+- `image_hashes.yml` at the repo root is updated with new image hashes from the archive.
+- Hash records are written as canonical paths pointing to the image bank.
 - Duplicate checks ignore matches when the 9-digit RUID prefix matches (same student).
 - Archive files without a 9-digit prefix are still included in duplicate checks.
 
 ## Archive maintenance
-- Dry-run legacy archive copy migration:
-	- `python3 tools/copy_archive_images.py --source-archive ARCHIVE_IMAGES`
-- Copy legacy archive images after reviewing the manifest:
-	- `python3 tools/copy_archive_images.py --source-archive ARCHIVE_IMAGES --copy`
 - Dry-run hash rebuild:
-	- `python3 tools/log_image_hashes.py --archive-root archive`
+	- `source source_me.sh && python tools/log_image_hashes.py`
 - Rebuild hash database:
-	- `python3 tools/log_image_hashes.py --archive-root archive --rebuild`
+	- `source source_me.sh && python tools/log_image_hashes.py --rebuild`
+- Migrate flat image_bank structure to term-organized:
+	- `source source_me.sh && python tools/migrate_image_bank_to_terms.py`
+- Apply the migration:
+	- `source source_me.sh && python tools/migrate_image_bank_to_terms.py --apply`
 
 ## Common image questions
 - If `spec_yaml_files/common_image_questions.yml` exists, it is merged into each assignment.

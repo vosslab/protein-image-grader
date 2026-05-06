@@ -4,46 +4,40 @@ This document describes how the archive is maintained and how image comparisons 
 for cheat detection.
 
 ## Archive layout
-- Archive root: `archive/`
-- Hash database: `archive/image_hashes.yml` (tracked)
-- Raw images (ignored by git):
-	- `archive/<year_term>/ARCHIVE_IMAGES/BCHM_Prot_Img_XX[_AssignmentName]/`
-	- `archive/legacy_import/ARCHIVE_IMAGES/BCHM_Prot_Img_XX[_AssignmentName]/`
+- Archive root: `Protein_Images/image_bank/`
+- Hash database: `image_hashes.yml` at repo root (tracked)
+- Raw/trim images (ignored by git):
+	- `Protein_Images/image_bank/<term>/<image_dir>/raw/`
+	- `Protein_Images/image_bank/<term>/<image_dir>/trim/`
 
-`<year_term>` is derived from the current date:
-- `1Spring` (Jan-May)
-- `2Summer` (Jun-Aug)
-- `3Fall` (Sep-Dec)
+`<term>` is canonical form `<season>_<year>`:
+- `spring_2026` (Jan-May)
+- `summer_2026` (Jun-Aug)
+- `fall_2026` (Sep-Dec)
+
+`<image_dir>` is derived from the form CSV basename, e.g., `BCHM_Prot_Img_04_Active_Site`.
 
 Canonical hash paths are repo-relative POSIX-style paths:
-- `archive/2026_1Spring/ARCHIVE_IMAGES/BCHM_Prot_Img_04_Active_Site/file.png`
-- `archive/legacy_import/ARCHIVE_IMAGES/BCHM_Prot_Img_04_Active_Site/file.png`
-
-The archive path rule is: read legacy path styles, write canonical paths.
+- `Protein_Images/image_bank/spring_2026/BCHM_Prot_Img_04_Active_Site/raw/file.png`
+- `Protein_Images/image_bank/spring_2026/BCHM_Prot_Img_04_Active_Site/trim/file-trim.jpg`
 
 ## Archive path utility
-- `protein_image_grader/archive_paths.py` centralizes archive path rules.
-- It normalizes paths before they are written to `archive/image_hashes.yml`.
-- It resolves old paths such as `ARCHIVE_IMAGES/...` for duplicate review.
-- If a legacy repo-root `ARCHIVE_IMAGES` symlink exists, it is used.
-- If that symlink is missing, legacy paths fall back to
-	`archive/legacy_import/ARCHIVE_IMAGES/...`.
-- Resolved paths may still point to missing files; caller code warns or fails based on context.
+- `protein_image_grader/archive_paths.py` and `protein_image_grader/protein_images_path.py` centralize archive path rules.
+- `protein_images_path.get_image_bank_dir()` resolves `Protein_Images/image_bank/`.
+- `archive_paths.normalize_hash_path()` normalizes paths to canonical form before writing to `image_hashes.yml`.
+- Paths are strictly validated: only `image_bank/<term>/<image_dir>/{raw,trim}/<file>` are accepted.
+- Legacy archive paths are not supported in new code paths.
 
 ## How the archive is updated
 
 ### Download flow
-- `download_submission_images.py` downloads each image.
-- Each image is copied into the archive assignment folder.
-- The hash database is updated with new hashes.
-
-### Grading flow
-- `grade_protein_image.py` downloads and saves each image.
-- Each image is copied into the archive assignment folder.
-- The hash database is updated with new hashes.
+- `download_submission_images.py` downloads each image to the working directory (`Protein_Images/semesters/<term>/<image_dir>/raw/`).
+- Each raw image is copied into the canonical archive folder (`Protein_Images/image_bank/<term>/<image_dir>/raw/`).
+- If `--trim` is used, each trimmed image is copied to `Protein_Images/image_bank/<term>/<image_dir>/trim/`.
+- The hash database is updated with new hashes pointing to the archive copies.
 
 ## Hash database format
-`archive/image_hashes.yml` contains two dictionaries:
+`image_hashes.yml` at the repo root contains two dictionaries:
 - `md5`: exact-match hash of pixel data
 - `phash`: perceptual hash for similarity detection
 
@@ -61,7 +55,7 @@ Computed in `duplicate_processing.py`:
 
 ### Global duplicates (across semesters)
 Computed in `duplicate_processing.py`:
-- `load_image_hashes()` loads `archive/image_hashes.yml`
+- `load_image_hashes()` loads `image_hashes.yml` from the repo root
 - `find_exact_global_duplicates()` checks current images against `md5` and `phash`
 - Matches with the same 9-digit RUID prefix are ignored (same student resubmission)
 - Archive files without a 9-digit prefix are still eligible for duplicate checks
@@ -80,22 +74,17 @@ Hashes are computed in `google_drive_image_utils.py`:
 
 ## Maintenance
 - To dry-run hash rebuilding:
-	- `python3 tools/log_image_hashes.py --archive-root archive`
+	- `source source_me.sh && python tools/log_image_hashes.py`
 - To rebuild hashes from the archive:
-	- `python3 tools/log_image_hashes.py --archive-root archive --rebuild`
-- It scans `archive/*/ARCHIVE_IMAGES/` and writes canonical paths to
-	`archive/image_hashes.yml`.
+	- `source source_me.sh && python tools/log_image_hashes.py --rebuild`
+- It scans `Protein_Images/image_bank/` and writes canonical paths to `image_hashes.yml`.
 
-## Legacy archive copy migration
-- Old Synology-backed archive folders are treated as read-only source data.
-- To audit a copy migration from a repo-root `ARCHIVE_IMAGES` symlink:
-	- `python3 tools/copy_archive_images.py --source-archive ARCHIVE_IMAGES`
-- Dry-run mode writes a manifest by default:
-	- `archive/legacy_import/copy_manifest.csv`
-- To copy files after reviewing the manifest:
-	- `python3 tools/copy_archive_images.py --source-archive ARCHIVE_IMAGES --copy`
-- Files are copied into:
-	- `archive/legacy_import/ARCHIVE_IMAGES/`
-- Existing identical files are reported as `skipped_existing`.
-- Existing different files are reported as `conflict` and are not overwritten.
-- Non-image files are reported as `non_image` and are not copied.
+## Archive migration
+- To migrate a flat `image_bank/` structure to term-organized layout:
+	- `source source_me.sh && python tools/migrate_image_bank_to_terms.py`
+- Dry-run mode (default) shows what would be moved.
+- To perform the actual migration:
+	- `source source_me.sh && python tools/migrate_image_bank_to_terms.py --apply`
+- Files are moved to `Protein_Images/image_bank/<term>/<assignment>/{raw,trim}/`.
+- Existing identical files (by MD5) are skipped.
+- Different files at the same destination path trigger an error and stop the migration.

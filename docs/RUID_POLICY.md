@@ -15,8 +15,8 @@ The Form RUID is whatever the student typed at submission time. Students transpo
 
 **When writing files to disk that include an RUID in the filename, always use the Roster RUID, never the Form RUID.** This applies to:
 
-- `Protein_Images/semesters/<term>/submissions/download_NN_raw/<RUID>-protein NN-...`
-- `archive/<term>/image_bank/<assignment>/<RUID>-protein NN-...`
+- `Protein_Images/semesters/<term>/<image_dir>/raw/<RUID>-protein NN-...`
+- `Protein_Images/image_bank/<term>/<image_dir>/{raw,trim}/<RUID>-protein NN-...`
 - `Protein_Images/semesters/<term>/grades/output-protein_image_NN.csv` (Student ID column)
 - `Protein_Images/semesters/<term>/grades/blackboard_upload-protein_image_NN.csv`
 - HTML profile pages (`profiles_image_NN.html`) shown during review.
@@ -34,7 +34,7 @@ For each form row, the pipeline:
    - Else fuzzy-match with a confidence score; below `auto_threshold` falls into interactive review.
 4. The resolved Roster RUID is used to format every on-disk filename and every CSV column.
 
-If resolution fails (no roster hit, ambiguous fuzzy match, manual reject), the row is **quarantined**: its image is not saved into `download_NN_raw/` under a typed RUID. Either the operator re-runs after fixing the roster, or the file is staged into a `download_NN_unresolved/` sibling for manual triage. The `output-protein_image_NN.csv` row for that student stays empty.
+If resolution fails (no roster hit, ambiguous fuzzy match, manual reject), the row is **quarantined**: its image is not saved into the working directory under a typed RUID. Either the operator re-runs after fixing the roster, or the file is staged into a manual triage folder for review. The `output-protein_image_NN.csv` row for that student stays empty.
 
 ## Audit trail
 
