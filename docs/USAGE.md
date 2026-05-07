@@ -51,17 +51,73 @@
 - Downloaded images (archived):
 	- `Protein_Images/image_bank/<term>/<image_dir>/raw/`
 	- `Protein_Images/image_bank/<term>/<image_dir>/trim/`
-- Grading outputs:
-	- `Protein_Images/semesters/<term>/<image_dir>/output-protein_image_NN.yml`
+- Grading outputs (final and per-stage checkpoints; see "Checkpoint files and resumption" below):
+	- `Protein_Images/semesters/<term>/<image_dir>/output-protein_image_NN.yml` (final, source of truth)
+	- `Protein_Images/semesters/<term>/<image_dir>/output-protein_image_NN.csv` (export, downstream of YAML)
+	- `Protein_Images/semesters/<term>/<image_dir>/post-questions_save.yml` (intermediate)
+	- `Protein_Images/semesters/<term>/<image_dir>/post-images_save.yml` (intermediate)
+	- `Protein_Images/semesters/<term>/<image_dir>/duplicate_check_save.yml` (intermediate)
+	- `Protein_Images/semesters/<term>/<image_dir>/downloaded_images.yml` (intermediate)
+	- `Protein_Images/semesters/<term>/<image_dir>/preprocess_save.yml` (intermediate)
 - Visual grading HTML:
 	- `Protein_Images/semesters/<term>/<image_dir>/profiles_image_NN.html`
-- Quarantine log (appended on every unresolvable row):
-	- `Protein_Images/semesters/<term>/forms/quarantine.log` lists rows
-	  whose Form RUID could not be resolved against the roster. No
-	  image is saved for these rows. Each entry includes the Form RUID,
-	  name, username, reason, score, and the top roster candidates the
-	  matcher considered. Investigate and fix the roster (or the typed
-	  RUID in the form CSV) before re-running.
+- Unresolved-RUID handling:
+	- The downloader and the grader both raise `RuntimeError` on the
+	  first row whose Form RUID cannot be resolved against
+	  `roster.csv`. No image is saved and no grading output is
+	  written. The error message names the offending Form RUID, the
+	  typed name and username, the resolver's reason and score, and
+	  the top roster candidates the matcher considered. Fix the
+	  roster (or the typed RUID in the form CSV) and re-run. See
+	  [docs/RUID_POLICY.md](RUID_POLICY.md).
+
+## Force regrade
+The grader resumes from a cached YAML checkpoint when `start_grading.py` routes to the `regrade` step. Cached students with `Image Assessment Complete: true` skip the interactive image-question prompt; their cached hashes, statuses, and final score flow into the regenerated CSV unchanged. To force re-doing one specific piece of work for one student, edit that student's row in the deepest checkpoint (`output-protein_image_NN.yml` when present, otherwise the latest stage's `*_save.yml`):
+
+| Operator edit | Effect on next grade run |
+| --- | --- |
+| Set `Image Assessment Complete: false` | Re-prompt the image questions for that student. All other cached state stays. |
+| Delete `<Question Name> Status` (drop the key) | Re-prompt that one CSV question. All other cached state stays. |
+| Delete the entire student YAML row | Treat the student as completely new. The full pipeline runs for that student on the next regrade. |
+
+Each lever controls only the work it describes. Hash- and download-forcing behavior is intentionally not promised here -- the existing image cache keys on `Image Format`, but the supported lever is to clear the field directly. To regrade a resubmission from an already-graded student, delete that student's YAML row; the merge keys identity on `Student ID` only and the cached row otherwise wins.
+
+## Checkpoint files and resumption
+The grader writes per-stage checkpoint YAMLs into each `<image_dir>/` so a crashed or interrupted run leaves the deepest reached state on disk. All six files share the same shape (a flat list of student dicts) but populate progressively richer fields. The table below lists files in the order the grader writes them during a normal run; `output-protein_image_NN.yml` is the deepest:
+
+| Filename | Written after | Stage |
+| --- | --- | --- |
+| `downloaded_images.yml` | `read_save_images.read_and_save_student_images` finishes | downloaded |
+| `duplicate_check_save.yml` | `duplicate_processing.check_duplicate_images` finishes | duplicate-check |
+| `preprocess_save.yml` | the per-student `timestamp_due_date` loop finishes (the "Pre-Processing Turn In Date" stage; the filename is historical and does NOT mean this is the earliest checkpoint) | preprocess |
+| `post-questions_save.yml` | `process_csv_question` finishes for all CSV questions | post-questions |
+| `post-images_save.yml` | `interactive_image_criteria_class.process_image_questions_class` finishes for all students | post-images |
+| `output-protein_image_NN.yml` | `file_io_protein.backup_tree_to_yaml` (final write, after final-score and exports) | output |
+
+`start_grading.py` picks the deepest valid checkpoint by precedence (deepest = most graded work preserved):
+
+```
+output > post-images > post-questions > preprocess > duplicate-check > downloaded
+```
+
+Both the dashboard and the regrade router use the same picker. Dashboard behavior:
+
+- Picks the deepest valid file silently.
+- When more than one checkpoint exists, the footer prints `image NN: using <label> checkpoint <chosen.name>; also found: <comma-list>`. No prompt; the dashboard is non-interactive.
+- When the deepest YAML fails `safe_load` or fails structural validation (must be a list of dicts, every entry has a non-empty `Student ID`, no duplicate Student IDs, `Protein Image Number` matches the requested image), the row reports `graded == "CONFLICT"` and the footer prints `image NN: CHECKPOINT CONFLICT: <reason>`.
+
+Regrade behavior:
+
+- Same picker; passes the chosen path to `grade_protein_image.py` via the existing `--yaml-backup-file` flag.
+- On checkpoint conflict, `regrade` aborts with exit code 2 and a clear message naming the offending file. No prompt. Operator deletes or repairs the file and re-runs.
+- A direct `python3 protein_image_grader/grade_protein_image.py -i NN --term <term>` call without `--yaml-backup-file` does not auto-resume; only `start_grading.py`'s regrade step picks a checkpoint automatically.
+
+CONFLICT recovery: when the dashboard reports `graded == "CONFLICT"` for an image, the deepest checkpoint YAML in that `<image_dir>/` either failed to parse or failed structural validation. To repair:
+
+- Inspect the file named in the footer warning. The reason follows the colon.
+- A valid checkpoint YAML must be a flat list of student dicts; each entry must carry a non-empty `Student ID` (string or int); no two entries may share a `Student ID`; if the entry carries `Protein Image Number`, it must equal the image number being graded.
+- The simplest fix is usually to delete the corrupt file. The next-deepest checkpoint takes over via precedence; in the worst case grading restarts from `preprocess_save.yml` or from scratch when no checkpoint remains.
+- If the file is mostly intact (e.g., one entry has a blank Student ID), edit it directly. Re-run `start_grading.py` to confirm the dashboard moved past CONFLICT.
 
 ## Archive behavior
 - Archive images are copied into `Protein_Images/image_bank/<term>/<image_dir>/{raw,trim}/` automatically.

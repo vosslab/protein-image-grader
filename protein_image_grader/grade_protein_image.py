@@ -14,6 +14,7 @@ import rich.style
 import rich.console
 
 # local repo modules
+import protein_image_grader.grade_status as grade_status
 import protein_image_grader.duplicate_processing as duplicate_processing
 import protein_image_grader.file_io_protein as file_io_protein
 import protein_image_grader.interactive_image_criteria_class as interactive_image_criteria_class
@@ -343,7 +344,7 @@ def get_final_score(student_entry: dict, read_only_config_dict: dict) -> None:
 #==========================================
 #==========================================
 #==========================================
-def parse_args() -> None:
+def parse_args() -> argparse.Namespace:
 	# Argument Parsing: Initialize the parser and add arguments
 	parser = argparse.ArgumentParser(
 		description="Process student answers from a CSV based on a given YAML config.")
@@ -361,8 +362,9 @@ def parse_args() -> None:
 			"Active term override (e.g., spring_2026). "
 			"Defaults to Protein_Images/active_term.txt."
 		))
-	parser.add_argument("-y", dest="yaml_backup_file", type=str,
-		help="Load backup data file", default=None)
+	parser.add_argument("-y", "--yaml-backup-file", dest="yaml_backup_file", type=str,
+		help="Resume from a checkpoint YAML written by an earlier grade run.",
+		default=None)
 	# Parse the arguments into a Namespace object
 	args = parser.parse_args()
 	return args
@@ -627,11 +629,138 @@ def load_yaml_config(params: dict) -> dict:
 
 	return read_only_config
 
-#============================================
 
+#============================================
+def _validate_unique_form_student_ids(form_tree: list) -> None:
+	"""
+	Raise if two form rows share a Student ID.
+
+	One student must produce at most one record per image; resubmissions
+	are handled by the operator's manual contract (delete the cached
+	YAML row to fully regrade), not by silent re-grading.
+
+	Args:
+		form_tree: List of student dicts as read from the form CSV.
+
+	Raises:
+		ValueError: when two rows carry the same Student ID; the message
+			lists both row indices to make hand-editing easy.
+	"""
+	seen: dict = {}
+	for index, row in enumerate(form_tree):
+		key = grade_status.student_key(row)
+		if key in seen:
+			raise ValueError(
+				f"duplicate Student ID {key!r} in form CSV at "
+				f"rows {seen[key]} and {index}; either remove the "
+				"older submission or delete the cached YAML row to "
+				"fully regrade this student."
+			)
+		seen[key] = index
+
+
+#============================================
+def _merge_yaml_into_form(form_tree: list, yaml_tree: list) -> list:
+	"""
+	Merge a cached checkpoint YAML into the freshly read form CSV.
+
+	Identity is `Student ID` only (resubmissions are not auto-regraded).
+	For each form row whose Student ID is in the YAML, the merged row
+	starts from the YAML row and the form row only fills keys that are
+	MISSING from the YAML; existing YAML values (cached hashes,
+	statuses, deductions, scores) are never overwritten. Form rows
+	whose Student ID is not in the YAML pass through unchanged. YAML
+	rows whose Student ID is no longer in the form CSV are appended at
+	the end and a warning is emitted (rare; operator may have edited
+	the form CSV by hand).
+
+	The form CSV is validated for duplicate Student IDs before merging;
+	YAML duplicates raise via `_validate_unique_yaml_student_ids` so the
+	helper can be called outside the normal `load_student_data` path.
+
+	Args:
+		form_tree: Latest form-CSV rows (defines column shape and order).
+		yaml_tree: Cached checkpoint rows (drives the grading state).
+
+	Returns:
+		Merged tree, in form-row order, with yaml-only rows appended
+		at the end.
+
+	Raises:
+		ValueError: on duplicate Student IDs in either tree.
+	"""
+	_validate_unique_form_student_ids(form_tree)
+	_validate_unique_yaml_student_ids(yaml_tree)
+	yaml_index = {grade_status.student_key(entry): entry for entry in yaml_tree}
+
+	merged_tree: list = []
+	consumed_yaml_keys: set = set()
+	for form_row in form_tree:
+		key = grade_status.student_key(form_row)
+		if key in yaml_index:
+			yaml_row = yaml_index[key]
+			merged_row = dict(yaml_row)
+			# Backfill: only keys NOT already in the YAML row may flow
+			# in from the form row. Existing YAML values (cached
+			# hashes, statuses, deductions) are never overwritten.
+			for form_key, form_value in form_row.items():
+				if form_key not in merged_row:
+					merged_row[form_key] = form_value
+			merged_tree.append(merged_row)
+			consumed_yaml_keys.add(key)
+		else:
+			merged_tree.append(form_row)
+
+	# Append any YAML rows that no form row claimed; warn the operator.
+	for yaml_key, yaml_row in yaml_index.items():
+		if yaml_key in consumed_yaml_keys:
+			continue
+		print(f"WARNING: yaml-only student {yaml_key} (no matching form row)")
+		merged_tree.append(yaml_row)
+
+	return merged_tree
+
+
+#============================================
+def _validate_unique_yaml_student_ids(yaml_tree: list) -> None:
+	"""
+	Raise if two YAML entries share a Student ID.
+
+	Mirrors the form-CSV check so `_merge_yaml_into_form` can be
+	called outside `load_student_data` (where `validate_checkpoint`
+	would otherwise have already caught the duplicate).
+
+	Args:
+		yaml_tree: List of cached student dicts.
+
+	Raises:
+		ValueError: when two entries share a Student ID.
+	"""
+	seen: dict = {}
+	for index, entry in enumerate(yaml_tree):
+		key = grade_status.student_key(entry)
+		if key in seen:
+			raise ValueError(
+				f"duplicate Student ID {key!r} in checkpoint YAML at "
+				f"entries {seen[key]} and {index}"
+			)
+		seen[key] = index
+
+
+#============================================
 def load_student_data(params: dict, read_only_config: dict) -> tuple:
 	"""
-	Load student data from CSV or backup YAML.
+	Load student data from the form CSV, optionally merging a cached
+	checkpoint YAML on top.
+
+	When `--yaml-backup-file` is supplied the function:
+	  - Reads the form CSV (latest column shape).
+	  - Loads + validates the checkpoint YAML.
+	  - Merges by Student ID with no-overwrite backfill.
+	  - Prints `Resuming from <path>` on success.
+
+	When the flag is absent the behavior is identical to the historical
+	wholesale path: read the form CSV, run roster matching.
 
 	Args:
 		params (dict): Dictionary containing file paths.
@@ -640,13 +769,36 @@ def load_student_data(params: dict, read_only_config: dict) -> tuple:
 	Returns:
 		tuple: (student_tree, student_ids_tree)
 	"""
-	# Load from YAML backup if provided
 	t0 = time.time()
-	if params["args"].yaml_backup_file:
-		with open(params["args"].yaml_backup_file, 'r') as f:
-			student_tree = yaml.safe_load(f)
+	# Always read the form CSV first: it carries the latest column
+	# shape (e.g., a CSV question added after the cached YAML was
+	# written) and is the source of truth for which submissions exist.
+	form_tree = file_io_protein.read_student_csv_data(
+		params["input_csv"], read_only_config
+	)
+
+	yaml_path = params["args"].yaml_backup_file
+	if yaml_path:
+		if not os.path.isfile(yaml_path):
+			raise FileNotFoundError(
+				f"Checkpoint YAML not found: {yaml_path}"
+			)
+		with open(yaml_path, "r", encoding="utf-8") as handle:
+			yaml_tree = yaml.safe_load(handle)
+		# Validate before trusting the file. Image-number cross-check
+		# guards against an operator pointing the regrade at the wrong
+		# image's checkpoint.
+		grade_status.validate_checkpoint(
+			yaml_tree, image_number=params["image_number"]
+		)
+		student_tree = _merge_yaml_into_form(form_tree, yaml_tree)
+		print(f"Resuming from {yaml_path}")
 	else:
-		student_tree = file_io_protein.read_student_csv_data(params["input_csv"], read_only_config)
+		# Form CSV is still validated for duplicate Student IDs so the
+		# initial grade path also fails loudly on bad input rather than
+		# silently grading one of the duplicates.
+		_validate_unique_form_student_ids(form_tree)
+		student_tree = form_tree
 
 	# Quick timestamp check
 	timestamp_tools.check_due_date(student_tree[-1]['timestamp'], read_only_config)

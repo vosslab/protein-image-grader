@@ -25,8 +25,13 @@ Protein_Images/
           <RUID>-proteinNN-*.png           # original images from Google Drive
         trim/                               # trimmed/rotated versions (if --trim)
           <RUID>-proteinNN-*-trim.jpg      # processed for display
-        output-protein_image_NN.yml         # grading results (after review)
-        output-protein_image_NN.csv         # student grades and scores
+        preprocess_save.yml                 # checkpoint: form rows parsed
+        downloaded_images.yml               # checkpoint: images downloaded + hashed
+        duplicate_check_save.yml            # checkpoint: duplicate detection done
+        post-images_save.yml                # checkpoint: image questions graded
+        post-questions_save.yml             # checkpoint: CSV questions graded
+        output-protein_image_NN.yml         # final checkpoint (source of truth for graded records)
+        output-protein_image_NN.csv         # exported grades (downstream of YAML)
         blackboard_upload-protein_image_NN.csv
         profiles_image_NN.html              # review interface (generated)
   image_bank/                               # canonical archive (cross-year plagiarism)
@@ -43,3 +48,6 @@ Protein_Images/
 - `protein_image_grader/archive_paths.py` normalizes archive paths for hashing.
 - `local_migrations/migrate_image_bank_to_terms.py` migrates flat image_bank/ to term-organized layout.
 - `tools/log_image_hashes.py` rebuilds the cheat detection database from archive sources.
+
+## Checkpoint resume
+- `protein_image_grader/grade_status.py`: shared helpers for the checkpoint-aware regrade pipeline. Owns the deepest-first checkpoint catalog (`output > post-questions > post-images > duplicate-check > downloaded > preprocess`), the `pick_checkpoint` deterministic picker (CONFLICT only on parse / validation failure or true same-rank duplicate; mtime is not used), structural validation (`validate_checkpoint`), the canonical `student_key` and `is_image_complete` helpers, and `count_graded_students_from_yaml` for the dashboard count.

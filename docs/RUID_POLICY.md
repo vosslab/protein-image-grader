@@ -10,7 +10,7 @@ Roosevelt University RUIDs are always **9 digits**. By rule:
 - Older students: 9 digits starting with `960...`
 
 Anything else (8 digits, 10 digits, leading zeros, alpha characters, NetID-like
-strings) is invalid and must be rejected or quarantined. The downloader uses
+strings) is invalid and aborts the run. The downloader uses
 this prefix rule as a fallback when the form CSV has no explicit Student-ID
 column: a cell whose stripped value starts with `900` or `960` is treated as
 the typed Form RUID candidate. Resolution against `roster.csv` still applies
@@ -50,10 +50,14 @@ The Form RUID is whatever the student typed at submission time. Students transpo
 The single resolver lives in `protein_image_grader/ruid_resolver.py` --
 one function, `resolve_form_row_to_roster_row`, plus the
 `ResolvedStudent` and `UnresolvedStudent` result dataclasses. Both the
-downloader (`download_submission_images.py`, non-interactive: quarantine
-on miss) and the grader (`student_id_protein.match_lists_and_add_student_ids`,
-interactive: raise on miss) call the same function with the same matcher
-and per-run `assigned_ruids` set. One resolver, two consumers.
+downloader (`download_submission_images.py`) and the grader
+(`student_id_protein.match_lists_and_add_student_ids`) call the same
+function with the same matcher and per-run `assigned_ruids` set. Both
+consumers raise `RuntimeError` on the first unresolved row: an
+unresolvable RUID means `roster.csv` is stale (or the typed value is
+wrong) and the operator must fix the roster before any image is saved
+or any grading output is written. One resolver, two consumers, one
+policy.
 
 For each form row, the pipeline:
 
@@ -66,14 +70,13 @@ For each form row, the pipeline:
    - Else fuzzy-match with a confidence score; below `auto_threshold` falls into interactive review.
 4. The resolved Roster RUID is used to format every on-disk filename and every CSV column.
 
-If resolution fails (no roster hit, ambiguous fuzzy match, manual reject), the row is **quarantined**: its image is not saved into the working directory under a typed RUID. Either the operator re-runs after fixing the roster, or the file is staged into a manual triage folder for review. The `output-protein_image_NN.csv` row for that student stays empty.
+If resolution fails (no roster hit, ambiguous fuzzy match, manual reject), both consumers raise `RuntimeError` on the first unresolved row and abort. No image is saved by the downloader; no checkpoint YAML or CSV export is written by the grader. The error message names the offending Form RUID, the student's typed name and username, the resolver's `reason`/`score`, and the top roster candidates the matcher considered, so the operator can fix `roster.csv` (or the form CSV) and re-run. Because exports are regenerated from the YAML on every grade run, an unresolved student never appears in either artifact.
 
 ## Audit trail
 
 The Form RUID is preserved per row, but never as a filename. Specifically:
 
 - `output-protein_image_NN.csv` carries both `Student ID` (Roster RUID, authoritative) and `Form RUID` (typed value, audit only).
-- `Protein_Images/semesters/<term>/forms/quarantine.log` records every form row whose Form RUID could not be resolved against the roster, including the top roster candidates the matcher considered. No image is saved for quarantined rows; the operator fixes the roster (or the form CSV) and re-runs.
 - The `WARNING OVERWRITING Student ID` log in `student_id_protein.merge_student_records` fires whenever the grader replaces a typed Form RUID with the resolved Roster RUID.
 
 ## Why this matters

@@ -8,6 +8,7 @@ import rich.console
 
 # local repo modules
 import protein_image_grader.file_io_protein as file_io_protein
+import protein_image_grader.grade_status as grade_status
 import protein_image_grader.student_id_protein as student_id_protein
 
 console = rich.console.Console()
@@ -213,29 +214,37 @@ class process_image_questions_class():
 
 	#==========================================
 	def process_image_questions(self, student_entry: dict) -> None:
-		"""
-		Process answers for image-based questions and update the student's entry accordingly.
+		"""Process answers for image-based questions and update the student's entry.
 
-		Parameters
-		----------
-		student_entry : dict
-			The dictionary containing the student's information and results. This will be updated with the
-			validation results.
+		The first thing this method does is fire the resume gate (skip
+		when `Image Assessment Complete` is true) BEFORE any field
+		access, so a cached YAML row missing later fields does not
+		crash before the gate. Operator can flip the field to false
+		to force a re-prompt for one student; see docs/USAGE.md
+		"Force regrade".
 
-		Returns
-		-------
-		None
-			This function modifies the student_entry dictionary in-place but does not return anything.
+		Args:
+			student_entry: Student dict; mutated in place with
+				per-question Status / Deduction / Feedback fields and
+				`Image Assessment Complete: True` on completion.
+
+		Returns:
+			None. Mutates `student_entry` in place.
 		"""
+
+		# Skip this student if the image-question pass already completed
+		# BEFORE any field access. A cached YAML row written during a
+		# crash recovery may be missing fields that print_student_info
+		# or the Original Filename print would touch; the gate must
+		# fire first so resume is robust. Operator can manually flip
+		# Image Assessment Complete to false to force a re-prompt for
+		# one student; see docs/USAGE.md "Force regrade".
+		if grade_status.is_image_complete(student_entry.get('Image Assessment Complete')):
+			return
 
 		# Print student information using the provided function
 		student_id_protein.print_student_info(student_entry)
-		#print(student_entry.keys())
 		print(f".. Original Filename = {student_entry['Original Filename']}")
-
-		# Skip this student if it has already been graded
-		if student_entry.get('Image Assessment Complete') is True:
-			return
 
 		validation = None
 		consensus_background_color = student_entry['Consensus Background Color']

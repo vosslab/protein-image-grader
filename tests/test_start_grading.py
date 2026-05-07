@@ -6,11 +6,16 @@ so they never touch the real Synology-synced data root and never call
 subprocess.run on real grader/downloader scripts.
 """
 
+# Standard Library
 import sys
+import types
 import pathlib
 
+# PIP3 modules
 import pytest
+import yaml
 
+# local repo modules
 import protein_image_grader.archive_paths
 import protein_image_grader.protein_images_path as pip
 import protein_image_grader.start_grading as sg
@@ -188,6 +193,8 @@ def test_status_row_for_complete_image(tmp_path, monkeypatch):
 	graded_yaml.write_text(_yaml.safe_dump([{
 		"Student ID": "900000001",
 		"Username": "alice",
+		"Image Assessment Complete": True,
+		"Protein Image Number": 1,
 	}]), encoding="ascii")
 	data = {}
 	_email_log.set_status(data, "900000001", 1, "sent",
@@ -424,21 +431,25 @@ def _form_csv_with_records(student_ids: list, base_ts: str) -> str:
 	return _form_csv_text(rows)
 
 
-def _output_csv_with_records(student_ids: list) -> str:
-	# Minimal output CSV: just a Student ID column (the only one
-	# count_graded_records reads). Grader writes tab-delimited (see
-	# file_io_protein.write_grades_csv); a single column has no
-	# delimiter to insert, so the same body works either way, but we
-	# explicitly mirror the real grader's format.
-	header = "Student ID\n"
-	body = "".join(f"{sid}\n" for sid in student_ids)
-	return header + body
+def _output_yaml_complete_for(student_ids: list, image_number: int) -> str:
+	# Minimal checkpoint YAML carrying just the fields the dashboard
+	# count helper needs: a non-empty Student ID, the image-number
+	# cross-check, and Image Assessment Complete: true.
+	rows = [
+		{
+			"Student ID": sid,
+			"Image Assessment Complete": True,
+			"Protein Image Number": image_number,
+		}
+		for sid in student_ids
+	]
+	return yaml.safe_dump(rows)
 
 
 def test_status_row_partial_when_form_has_more_records(tmp_path, monkeypatch):
 	_install_fake_repo_root(monkeypatch, tmp_path)
 	skel = _make_term_skeleton(tmp_path, "spring_2026")
-	# Form CSV with 5 submitter rows; output CSV has only 3.
+	# Form CSV with 5 submitter rows; checkpoint YAML has only 3 complete.
 	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_08-Membrane.csv"
 	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
 	form_csv.write_text(
@@ -453,8 +464,12 @@ def test_status_row_partial_when_form_has_more_records(tmp_path, monkeypatch):
 	image_dir.mkdir(parents=True, exist_ok=True)
 	(image_dir / "raw").mkdir()
 	(image_dir / "raw" / "x.jpg").write_text("", encoding="ascii")
-	(image_dir / "output-protein_image_08.csv").write_text(
-		_output_csv_with_records(["900000001", "900000002", "900000003"]),
+	# Dashboard reads YAML, not CSV, for the graded count. Write the
+	# canonical output checkpoint with three complete students.
+	(image_dir / "output-protein_image_08.yml").write_text(
+		_output_yaml_complete_for(
+			["900000001", "900000002", "900000003"], 8
+		),
 		encoding="ascii",
 	)
 	(image_dir / "blackboard_upload-protein_image_08.csv").write_text(
@@ -472,51 +487,6 @@ def test_status_row_partial_when_form_has_more_records(tmp_path, monkeypatch):
 	assert row["form_count"] == 5
 	assert row["graded_count"] == 3
 	assert row["next_step"] == "regrade"
-
-
-def test_count_graded_records_handles_commas_inside_cells(tmp_path):
-	# Regression: the grader's output CSV is comma-delimited (see
-	# file_io_protein.write_output_file) but the headers themselves
-	# contain commas (e.g. "File type is PNG, not JPEG or something
-	# else Status"). csv.DictWriter wraps such cells in double quotes
-	# per RFC 4180; csv.DictReader unquotes them. count_graded_records
-	# must use the comma path and rely on the quoted-cell handling.
-	import csv as _csv
-	output_csv = tmp_path / "output.csv"
-	headers = [
-		"128-bit MD5 Hash",
-		"File type is PNG, not JPEG or something else Status",
-		"Final Score",
-		"Student ID",
-		"Username",
-	]
-	rows = [
-		{
-			"128-bit MD5 Hash": f"hash{i}",
-			"File type is PNG, not JPEG or something else Status": "Correct",
-			"Final Score": "5.00",
-			"Student ID": f"90000000{i}",
-			"Username": f"user{i}",
-		}
-		for i in range(3)
-	]
-	with open(output_csv, "w", newline="", encoding="utf-8") as handle:
-		writer = _csv.DictWriter(handle, headers)
-		writer.writeheader()
-		writer.writerows(rows)
-	assert sg.count_graded_records(output_csv) == 3
-
-
-def test_count_graded_records_reads_legacy_tab_delimited(tmp_path):
-	# Backward-compat: older grader writes were tab-delimited. Operators
-	# still have those on disk under spring_2026/. count_graded_records
-	# must auto-detect the delimiter from the header line so the
-	# dashboard does not crash on files written before the comma flip.
-	output_csv = tmp_path / "output.csv"
-	header = "128-bit MD5 Hash\tFinal Score\tStudent ID\tUsername\n"
-	rows = "".join(f"hash{i}\t5.00\t90000000{i}\tuser{i}\n" for i in range(4))
-	output_csv.write_text(header + rows, encoding="utf-8")
-	assert sg.count_graded_records(output_csv) == 4
 
 
 def test_compute_next_step_partial_routes_to_regrade():
@@ -602,8 +572,8 @@ def test_auto_select_step_routes_partial_to_regrade(tmp_path, monkeypatch):
 	image_dir.mkdir(parents=True, exist_ok=True)
 	(image_dir / "raw").mkdir()
 	(image_dir / "raw" / "x.jpg").write_text("", encoding="ascii")
-	(image_dir / "output-protein_image_08.csv").write_text(
-		_output_csv_with_records(["900000001"]),
+	(image_dir / "output-protein_image_08.yml").write_text(
+		_output_yaml_complete_for(["900000001"], 8),
 		encoding="ascii",
 	)
 	(image_dir / "blackboard_upload-protein_image_08.csv").write_text(
@@ -615,3 +585,360 @@ def test_auto_select_step_routes_partial_to_regrade(tmp_path, monkeypatch):
 	)
 	step = sg.auto_select_step("spring_2026", 8)
 	assert step == "regrade"
+
+
+# ---- build_grade_command checkpoint resume --------------------------------
+
+def test_build_grade_command_no_yaml_path_matches_today(tmp_path):
+	# Initial grade path: no checkpoint passed -> command must NOT
+	# carry --yaml-backup-file. This is the default initial-grade flow.
+	cmd = sg.build_grade_command(8, "spring_2026")
+	assert "--yaml-backup-file" not in cmd
+
+
+def test_build_grade_command_includes_yaml_backup_file_when_provided(tmp_path):
+	# Regrade routing path: when start_grading.run_step picks a
+	# checkpoint, build_grade_command appends the existing
+	# --yaml-backup-file flag with that path.
+	yaml_path = tmp_path / "output-protein_image_08.yml"
+	yaml_path.write_text("[]", encoding="ascii")
+	cmd = sg.build_grade_command(8, "spring_2026", yaml_backup_file=yaml_path)
+	assert "--yaml-backup-file" in cmd
+	idx = cmd.index("--yaml-backup-file")
+	assert cmd[idx + 1] == str(yaml_path)
+
+
+# ---- dashboard YAML truth: CONFLICT + multi-checkpoint footer -------------
+
+def test_status_row_conflict_when_deepest_yaml_unparseable(tmp_path,
+		monkeypatch):
+	# A corrupt deepest checkpoint must surface as graded == CONFLICT
+	# with no exception escaping build_status_row, and the footer
+	# warning must carry the conflict reason. The dashboard never
+	# prompts; the operator fixes the file and re-runs.
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_08-Membrane.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	form_csv.write_text(
+		_form_csv_with_records(["900000001"], "PM"),
+		encoding="ascii",
+	)
+	image_dir = pip.get_term_image_dir("spring_2026", 8)
+	image_dir.mkdir(parents=True, exist_ok=True)
+	(image_dir / "raw").mkdir()
+	(image_dir / "raw" / "x.jpg").write_text("", encoding="ascii")
+	# Corrupt YAML: not parseable.
+	(image_dir / "output-protein_image_08.yml").write_text(
+		"this: is: not: valid: ::", encoding="ascii"
+	)
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n",
+		encoding="ascii",
+	)
+	canonical_csvs = sg.find_canonical_form_csvs("spring_2026")
+	row = sg.build_status_row(8, "spring_2026", canonical_csvs)
+	assert row["graded"] == "CONFLICT"
+	assert row["next_step"] == "fix checkpoint"
+	assert row["graded_count"] is None
+	assert row["checkpoint_conflict_reason"] is not None
+	# Footer surfaces the conflict.
+	footer = sg.render_footer_warnings("spring_2026", rows=[row])
+	assert "CHECKPOINT CONFLICT" in footer
+	assert "image 08" in footer
+
+
+def test_status_row_multi_checkpoint_footer_lists_others(tmp_path,
+		monkeypatch):
+	# Two checkpoints on disk (output + post-questions). Dashboard
+	# picks the deepest (output) and a footer warning lists the
+	# shallower one so the operator knows the partial-run file is
+	# still around. No conflict; status is OK.
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_08-Membrane.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	form_csv.write_text(
+		_form_csv_with_records(["900000001"], "PM"),
+		encoding="ascii",
+	)
+	image_dir = pip.get_term_image_dir("spring_2026", 8)
+	image_dir.mkdir(parents=True, exist_ok=True)
+	(image_dir / "raw").mkdir()
+	(image_dir / "raw" / "x.jpg").write_text("", encoding="ascii")
+	output_yaml_text = _output_yaml_complete_for(["900000001"], 8)
+	(image_dir / "output-protein_image_08.yml").write_text(
+		output_yaml_text, encoding="ascii"
+	)
+	(image_dir / "post-questions_save.yml").write_text(
+		output_yaml_text, encoding="ascii"
+	)
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n",
+		encoding="ascii",
+	)
+	canonical_csvs = sg.find_canonical_form_csvs("spring_2026")
+	row = sg.build_status_row(8, "spring_2026", canonical_csvs)
+	# Status is OK because no conflict and graded_count == form_count.
+	assert row["graded"] == "OK"
+	assert row["checkpoint_label"] == "output"
+	assert len(row["checkpoint_candidates"]) == 2
+	footer = sg.render_footer_warnings("spring_2026", rows=[row])
+	assert "post-questions_save.yml" in footer
+	assert "using output checkpoint" in footer
+
+
+def test_status_row_dashboard_does_not_call_input(tmp_path, monkeypatch):
+	# Hard guard against the dashboard ever becoming interactive: any
+	# call to input() during build_status_row would raise from this
+	# stub. Cover the OK, PARTIAL, CONFLICT, and MISSING paths in one
+	# spin so a regression in any branch is loud.
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	# Prepare image 1: graded OK.
+	_drop_canonical_csv(tmp_path, "spring_2026", 1)
+	image_dir_1 = pip.get_term_image_dir("spring_2026", 1)
+	image_dir_1.mkdir(parents=True, exist_ok=True)
+	(image_dir_1 / "raw").mkdir()
+	(image_dir_1 / "output-protein_image_01.yml").write_text(
+		_output_yaml_complete_for(["900000001"], 1),
+		encoding="ascii",
+	)
+	# Prepare image 2: CONFLICT (corrupt YAML).
+	_drop_canonical_csv(tmp_path, "spring_2026", 2)
+	image_dir_2 = pip.get_term_image_dir("spring_2026", 2)
+	image_dir_2.mkdir(parents=True, exist_ok=True)
+	(image_dir_2 / "raw").mkdir()
+	(image_dir_2 / "output-protein_image_02.yml").write_text(
+		"::not: valid: ::", encoding="ascii"
+	)
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n",
+		encoding="ascii",
+	)
+	# Trip on any call to input() from the dashboard path. A named
+	# function reads more clearly than the generator-throw lambda
+	# workaround for raising from a lambda body.
+	def _raise_on_input(*_a, **_k):
+		raise AssertionError("dashboard must not prompt")
+	monkeypatch.setattr("builtins.input", _raise_on_input)
+	canonical_csvs = sg.find_canonical_form_csvs("spring_2026")
+	# Both rows succeed without prompting.
+	sg.build_status_row(1, "spring_2026", canonical_csvs)
+	sg.build_status_row(2, "spring_2026", canonical_csvs)
+
+
+def test_compute_next_step_conflict_routes_to_fix_checkpoint():
+	step = sg.compute_next_step(
+		form_status="OK",
+		downloaded_status="OK",
+		graded_status="CONFLICT",
+		bb_status="MISSING",
+		emailed_status="MISSING",
+	)
+	assert step == "fix checkpoint"
+
+
+# ---- WP6c case 6: zero complete entries -> MISSING -----------------------
+
+def test_status_row_yaml_with_zero_complete_entries_is_missing(tmp_path,
+		monkeypatch):
+	# A YAML on disk that carries entries but none of them are
+	# Image Assessment Complete must surface as MISSING (regression
+	# guard: the dashboard does not "graduate" a checkpoint just
+	# because it exists).
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_08-Membrane.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	form_csv.write_text(
+		_form_csv_with_records(["900000001"], "PM"),
+		encoding="ascii",
+	)
+	image_dir = pip.get_term_image_dir("spring_2026", 8)
+	image_dir.mkdir(parents=True, exist_ok=True)
+	(image_dir / "raw").mkdir()
+	# YAML row exists but Image Assessment Complete is False.
+	yaml_text = yaml.safe_dump([{
+		"Student ID": "900000001",
+		"Image Assessment Complete": False,
+		"Protein Image Number": 8,
+	}])
+	(image_dir / "output-protein_image_08.yml").write_text(
+		yaml_text, encoding="ascii"
+	)
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n",
+		encoding="ascii",
+	)
+	canonical_csvs = sg.find_canonical_form_csvs("spring_2026")
+	row = sg.build_status_row(8, "spring_2026", canonical_csvs)
+	assert row["graded"] == "MISSING"
+
+
+# ---- WP6c case 9: CSV-only on disk, no YAML -> MISSING -------------------
+
+def test_status_row_csv_only_no_yaml_is_missing(tmp_path, monkeypatch):
+	# Regression gate against re-introducing CSV-as-truth: a graded
+	# CSV on disk with NO YAML must report MISSING. The CSV is
+	# downstream of the YAML and is not consulted by the dashboard.
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_08-Membrane.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	form_csv.write_text(
+		_form_csv_with_records(["900000001"], "PM"),
+		encoding="ascii",
+	)
+	image_dir = pip.get_term_image_dir("spring_2026", 8)
+	image_dir.mkdir(parents=True, exist_ok=True)
+	(image_dir / "raw").mkdir()
+	# Only the CSV export exists; no checkpoint YAML.
+	(image_dir / "output-protein_image_08.csv").write_text(
+		"Student ID\n900000001\n", encoding="ascii"
+	)
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n",
+		encoding="ascii",
+	)
+	canonical_csvs = sg.find_canonical_form_csvs("spring_2026")
+	row = sg.build_status_row(8, "spring_2026", canonical_csvs)
+	assert row["graded"] == "MISSING"
+
+
+# ---- WP6c precedence: post-questions chosen when output absent ----------
+
+def test_status_row_picks_post_questions_when_output_absent(tmp_path,
+		monkeypatch):
+	# pick_checkpoint precedence: with no output-NN.yml on disk but a
+	# post-questions_save.yml present, the dashboard must pick the
+	# shallower checkpoint. graded_status is OK (form_count == 1,
+	# graded_count == 1) and the row's checkpoint_label confirms
+	# which file was chosen.
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_08-Membrane.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	form_csv.write_text(
+		_form_csv_with_records(["900000001"], "PM"),
+		encoding="ascii",
+	)
+	image_dir = pip.get_term_image_dir("spring_2026", 8)
+	image_dir.mkdir(parents=True, exist_ok=True)
+	(image_dir / "raw").mkdir()
+	(image_dir / "post-questions_save.yml").write_text(
+		_output_yaml_complete_for(["900000001"], 8),
+		encoding="ascii",
+	)
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n",
+		encoding="ascii",
+	)
+	canonical_csvs = sg.find_canonical_form_csvs("spring_2026")
+	row = sg.build_status_row(8, "spring_2026", canonical_csvs)
+	assert row["graded"] == "OK"
+	assert row["checkpoint_label"] == "post-questions"
+
+
+# ---- WP6c case 4: run_step regrade abort on conflict ---------------------
+
+def test_run_step_regrade_aborts_non_zero_on_conflict(tmp_path, monkeypatch):
+	# Operator runs `start_grading.py` in regrade mode for an image
+	# whose deepest checkpoint is corrupt. run_step must:
+	#  - return a non-zero exit code (specifically 2 to distinguish
+	#    "operator must repair" from "user aborted prompt"),
+	#  - NOT call subprocess.run (no grader spawn),
+	#  - NOT prompt via input(),
+	#  - print a message naming the offending file.
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_08-Membrane.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	form_csv.write_text(
+		_form_csv_with_records(["900000001"], "PM"),
+		encoding="ascii",
+	)
+	image_dir = pip.get_term_image_dir("spring_2026", 8)
+	image_dir.mkdir(parents=True, exist_ok=True)
+	(image_dir / "raw").mkdir()
+	(image_dir / "raw" / "x.jpg").write_text("", encoding="ascii")
+	# Corrupt deepest checkpoint -> pick_checkpoint reports conflict.
+	corrupt_path = image_dir / "output-protein_image_08.yml"
+	corrupt_path.write_text("::not: valid: ::", encoding="ascii")
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n",
+		encoding="ascii",
+	)
+
+	def _raise_on_input(*_a, **_k):
+		raise AssertionError("regrade must not prompt on conflict")
+	monkeypatch.setattr("builtins.input", _raise_on_input)
+
+	def _raise_on_subprocess(*_a, **_k):
+		raise AssertionError("regrade must not spawn the grader on conflict")
+	monkeypatch.setattr("subprocess.run", _raise_on_subprocess)
+
+	exit_code = sg.run_step("spring_2026", 8, "regrade")
+	assert exit_code == 2
+
+
+# ---- WP6c case 1: regrade with output-NN.yml routes through --yaml-backup-file ----
+
+def test_run_step_regrade_passes_output_yml_to_grader(tmp_path, monkeypatch):
+	# When a clean output checkpoint exists, run_step("regrade") spawns
+	# the grader with --yaml-backup-file pointing at that file. We
+	# capture the spawned argv via a subprocess.run stub.
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_08-Membrane.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	form_csv.write_text(
+		_form_csv_with_records(["900000001"], "PM"),
+		encoding="ascii",
+	)
+	image_dir = pip.get_term_image_dir("spring_2026", 8)
+	image_dir.mkdir(parents=True, exist_ok=True)
+	(image_dir / "raw").mkdir()
+	(image_dir / "raw" / "x.jpg").write_text("", encoding="ascii")
+	output_yaml = image_dir / "output-protein_image_08.yml"
+	output_yaml.write_text(
+		_output_yaml_complete_for(["900000001"], 8),
+		encoding="ascii",
+	)
+	# No graded CSV on disk -> no overwrite prompt -> no input call.
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n",
+		encoding="ascii",
+	)
+
+	captured: dict = {}
+
+	def _capture_subprocess(argv, *_a, **_k):
+		captured["argv"] = argv
+		# Return a duck-type stand-in for subprocess.CompletedProcess
+		# carrying just the .returncode that run_step reads.
+		return types.SimpleNamespace(returncode=0)
+
+	# Guard against the overwrite-prompt condition changing in the
+	# future and reaching input(): no graded CSV is on disk in this
+	# fixture, so the prompt branch should not execute. If it does,
+	# the stub raises and the test fails loudly rather than blocking.
+	def _raise_on_input(*_a, **_k):
+		raise AssertionError("regrade-resume must not prompt on this fixture")
+	monkeypatch.setattr("builtins.input", _raise_on_input)
+	monkeypatch.setattr("subprocess.run", _capture_subprocess)
+
+	exit_code = sg.run_step("spring_2026", 8, "regrade")
+	assert exit_code == 0
+	argv = captured["argv"]
+	assert "--yaml-backup-file" in argv
+	idx = argv.index("--yaml-backup-file")
+	assert argv[idx + 1] == str(output_yaml)

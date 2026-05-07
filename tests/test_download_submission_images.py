@@ -413,11 +413,12 @@ def test_generate_html_uses_roster_ruid(monkeypatch, tmp_path):
 		assert name.endswith("-trim.jpg")
 
 
-def test_generate_html_quarantines_unresolved_row(monkeypatch, tmp_path):
+def test_generate_html_raises_on_unresolved_row(monkeypatch, tmp_path):
 	"""
-	Rows the resolver cannot resolve must not produce any saved image,
-	must be logged to <csv_dir>/quarantine.log, and must surface a
-	QUARANTINED marker in the HTML page.
+	An unresolved Form RUID means roster.csv is stale (or the typed
+	value is wrong). The downloader must abort with RuntimeError
+	rather than silently dropping the row -- the operator has to fix
+	the roster before any image can be saved.
 	"""
 	_install_fake_repo_root(monkeypatch, tmp_path)
 	_stub_image_io(monkeypatch, tmp_path)
@@ -435,36 +436,25 @@ def test_generate_html_quarantines_unresolved_row(monkeypatch, tmp_path):
 	)
 	header, data_tree = dsi.read_csv(str(csv_path), -1)
 
-	# Empty roster -> every row goes to quarantine.
+	# Empty roster -> every row is unresolvable.
 	import protein_image_grader.roster_matching as rm
 	matcher = rm.RosterMatcher(roster={}, interactive=False)
 	args = _args(image_number=1, trim=True)
 	html_path = image_dir / "profiles.html"
 
-	dsi.generate_html(
-		str(csv_path), header, data_tree, args,
-		str(image_dir), str(image_raw_dir), None,
-		str(html_path), {"md5": {}, "phash": {}}, [False],
-		matcher, set(),
-	)
+	import pytest
+	with pytest.raises(RuntimeError, match="Unresolved Form RUID"):
+		dsi.generate_html(
+			str(csv_path), header, data_tree, args,
+			str(image_dir), str(image_raw_dir), None,
+			str(html_path), {"md5": {}, "phash": {}}, [False],
+			matcher, set(),
+		)
 
-	# No image was saved under the Form RUID (or under any RUID) for
-	# the quarantined row. Property assertion: nothing in raw/ carries
-	# the typed Form RUID, and no trim/ subdir was created.
+	# No image was saved under the Form RUID; no quarantine.log written.
 	for p in image_raw_dir.iterdir():
 		assert "900999999" not in p.name, p.name
-	assert not (image_dir / "trim").exists()
-
-	# Quarantine log was written next to the CSV.
-	q_log = csv_path.parent / "quarantine.log"
-	assert q_log.is_file()
-	contents = q_log.read_text(encoding="ascii")
-	assert "form_ruid='900999999'" in contents
-	assert "Ghost" in contents
-
-	# HTML page surfaces the QUARANTINED marker.
-	html = html_path.read_text(encoding="utf-8")
-	assert "QUARANTINED" in html
+	assert not (csv_path.parent / "quarantine.log").exists()
 
 
 def test_generate_html_raises_on_same_csv_duplicate(monkeypatch, tmp_path):
@@ -504,7 +494,9 @@ def test_generate_html_raises_on_same_csv_duplicate(monkeypatch, tmp_path):
 	html_path = image_dir / "profiles.html"
 
 	import pytest
-	with pytest.raises(RuntimeError, match="Duplicate roster match"):
+	# Same-CSV duplicate flows through the same Unresolved path as a
+	# stale-roster miss; resolver tags it with reason=duplicate.
+	with pytest.raises(RuntimeError, match="reason=duplicate"):
 		dsi.generate_html(
 			str(csv_path), header, data_tree, args,
 			str(image_dir), str(image_raw_dir), None,
@@ -515,9 +507,11 @@ def test_generate_html_raises_on_same_csv_duplicate(monkeypatch, tmp_path):
 
 def test_generate_html_resolver_called_per_row(monkeypatch, tmp_path):
 	"""
-	Resolver is invoked once per data row regardless of resolution outcome.
-	A two-row CSV (one resolvable, one not) must produce exactly two
-	resolver calls and exactly one saved image (under the Roster RUID).
+	Resolver is invoked once per data row. A CSV whose first row is
+	resolvable and second row is not aborts on the second row, with
+	exactly two resolver calls and exactly one saved image (the
+	resolvable row, written before the second row triggered the
+	abort).
 	"""
 	_install_fake_repo_root(monkeypatch, tmp_path)
 	_stub_image_io(monkeypatch, tmp_path)
@@ -557,16 +551,18 @@ def test_generate_html_resolver_called_per_row(monkeypatch, tmp_path):
 	monkeypatch.setattr(dsi.ruid_resolver, "resolve_form_row_to_roster_row",
 		counting)
 
-	dsi.generate_html(
-		str(csv_path), header, data_tree, _args(image_number=1),
-		str(image_dir), str(image_raw_dir), None,
-		str(image_dir / "profiles.html"),
-		{"md5": {}, "phash": {}}, [False], matcher, set(),
-	)
+	import pytest
+	with pytest.raises(RuntimeError, match="Unresolved Form RUID"):
+		dsi.generate_html(
+			str(csv_path), header, data_tree, _args(image_number=1),
+			str(image_dir), str(image_raw_dir), None,
+			str(image_dir / "profiles.html"),
+			{"md5": {}, "phash": {}}, [False], matcher, set(),
+		)
 
 	assert call_count[0] == 2
-	# The resolved row produced exactly one saved file under the Roster
-	# RUID; the quarantined row produced none.
+	# The resolved row's image was saved before the abort; the
+	# unresolvable row's typed RUID never lands on disk.
 	saved = [p.name for p in image_raw_dir.iterdir()]
 	assert any(name.startswith("900000002-") for name in saved), saved
 	assert not any("900999999" in name for name in saved), saved
@@ -665,10 +661,12 @@ def test_header_lookup_is_case_insensitive(monkeypatch, tmp_path):
 	assert any(name.startswith("900000002-") for name in saved), saved
 
 
-def test_quarantine_log_appends_multiple_rows(monkeypatch, tmp_path):
+def test_generate_html_aborts_on_first_unresolved_row(monkeypatch, tmp_path):
 	"""
-	A multi-row CSV with two unresolvable rows must append two distinct
-	records to quarantine.log (the file is opened in 'a' mode per row).
+	First-fail abort: the downloader stops on the first unresolvable
+	row even when later rows would also be unresolvable. The
+	RuntimeError names the offending row's Form RUID specifically (not
+	just the second row's), and no quarantine.log is created.
 	"""
 	_install_fake_repo_root(monkeypatch, tmp_path)
 	_stub_image_io(monkeypatch, tmp_path)
@@ -690,18 +688,15 @@ def test_quarantine_log_appends_multiple_rows(monkeypatch, tmp_path):
 	import protein_image_grader.roster_matching as rm
 	matcher = rm.RosterMatcher(roster={}, interactive=False)
 
-	dsi.generate_html(
-		str(csv_path), header, data_tree, _args(image_number=1),
-		str(image_dir), str(image_raw_dir), None,
-		str(image_dir / "profiles.html"),
-		{"md5": {}, "phash": {}}, [False], matcher, set(),
-	)
-
-	q_log = csv_path.parent / "quarantine.log"
-	contents = q_log.read_text(encoding="ascii")
-	# Both quarantined rows were appended; neither overwrote the other.
-	assert "form_ruid='900111111'" in contents
-	assert "form_ruid='900222222'" in contents
+	import pytest
+	with pytest.raises(RuntimeError, match="900111111"):
+		dsi.generate_html(
+			str(csv_path), header, data_tree, _args(image_number=1),
+			str(image_dir), str(image_raw_dir), None,
+			str(image_dir / "profiles.html"),
+			{"md5": {}, "phash": {}}, [False], matcher, set(),
+		)
+	assert not (csv_path.parent / "quarantine.log").exists()
 
 
 def test_assigned_ruids_reset_per_csv_in_one_run(monkeypatch, tmp_path):

@@ -9,8 +9,8 @@ grade_protein_image.py for one image at a time. Never batch-grades.
 
 # Standard Library
 import os
-import sys
 import csv
+import sys
 import shutil
 import pathlib
 import argparse
@@ -23,6 +23,7 @@ import tabulate
 import protein_image_grader.email_log as email_log
 import protein_image_grader.csv_compare as csv_compare
 import protein_image_grader.form_columns as form_columns
+import protein_image_grader.grade_status as grade_status
 import protein_image_grader.archive_paths as archive_paths
 import protein_image_grader.roster_matching as roster_matching
 import protein_image_grader.protein_images_path as protein_images_path
@@ -180,41 +181,6 @@ def count_form_records(canonical_csv: pathlib.Path) -> int:
 
 
 #============================================
-def _detect_delimiter(header_line: str) -> str:
-	"""
-	Pick the dominant delimiter (comma or tab) from a CSV header line.
-
-	The grader writes comma-delimited per file_io_protein, but on-disk
-	files written before the comma migration are tab-delimited. Detect
-	rather than guess so a stale TSV does not poison the dashboard.
-	"""
-	if header_line.count("\t") > header_line.count(","):
-		return "\t"
-	return ","
-
-
-#============================================
-def count_graded_records(output_csv: pathlib.Path) -> int:
-	"""
-	Return the number of data rows in `output_csv` whose Student-ID
-	cell is non-empty. The grader writes comma-delimited (see
-	file_io_protein.write_output_file); legacy tab-delimited files
-	from before the migration are still read via _detect_delimiter.
-	"""
-	with open(output_csv, "r", encoding="utf-8-sig", newline="") as handle:
-		first_line = handle.readline()
-		delimiter = _detect_delimiter(first_line)
-		handle.seek(0)
-		reader = csv.DictReader(handle, delimiter=delimiter)
-		count = 0
-		for row in reader:
-			value = row["Student ID"]
-			if value and value.strip():
-				count += 1
-	return count
-
-
-#============================================
 def is_non_empty_dir(path: pathlib.Path) -> bool:
 	if not path.is_dir():
 		return False
@@ -251,28 +217,51 @@ def build_status_row(image_number: int, term: str,
 
 	form_count = None
 	graded_count = None
+	# Checkpoint metadata for footer warnings: which file was picked,
+	# how many candidates exist, and -- on conflict -- the reason. The
+	# dashboard never prompts; ambiguity surfaces as footer text.
+	checkpoint_label = None
+	checkpoint_candidates: list = []
+	checkpoint_conflict_reason = None
 	if image_dir is None:
 		downloaded_status = "MISSING"
 		graded_status = "MISSING"
 		bb_status = "MISSING"
 	else:
 		downloaded_status = "OK" if is_non_empty_dir(image_dir / "raw") else "MISSING"
-		graded_csv = image_dir / f"output-protein_image_{image_number:02d}.csv"
-		graded_status = "OK" if graded_csv.is_file() else "MISSING"
 		bb_csv = image_dir / f"blackboard_upload-protein_image_{image_number:02d}.csv"
 		bb_status = "OK" if bb_csv.is_file() else "MISSING"
-		# Compare counts only when both sides are usable. Form-side
-		# count needs exactly one canonical CSV (form_status == "OK");
-		# graded-side count needs the output CSV on disk.
-		if form_status == "OK" and graded_status == "OK":
-			form_count = count_form_records(csv_matches[0])
-			graded_count = count_graded_records(graded_csv)
-			# Strict less-than -> PARTIAL (operator must regrade the
-			# new row(s)). Equal counts stay OK. More-graded-than-form
-			# is handled in render_footer_warnings as a stale-output
-			# warning; status stays OK because no regrade would help.
-			if graded_count < form_count:
-				graded_status = "PARTIAL"
+		# YAML is the source of truth for graded records (CSV is just
+		# the export). Use the deepest valid checkpoint from the
+		# canonical catalog; on parse / validation failure the row goes
+		# CONFLICT so the operator can repair the file.
+		pick_result = grade_status.pick_checkpoint(image_dir, image_number)
+		checkpoint_candidates = [hit.path for hit in pick_result.candidates]
+		if pick_result.conflict:
+			graded_status = "CONFLICT"
+			checkpoint_conflict_reason = pick_result.conflict_reason
+		elif pick_result.chosen is None:
+			graded_status = "MISSING"
+		else:
+			checkpoint_label = pick_result.label
+			graded_count = grade_status.count_graded_students_from_yaml(
+				pick_result.chosen
+			)
+			if graded_count == 0:
+				graded_status = "MISSING"
+			elif form_status == "OK":
+				form_count = count_form_records(csv_matches[0])
+				# Strict less-than -> PARTIAL. Equal stays OK.
+				# More-graded-than-form is handled in
+				# render_footer_warnings as a stale-output warning.
+				if graded_count < form_count:
+					graded_status = "PARTIAL"
+				else:
+					graded_status = "OK"
+			else:
+				# Form CSV missing or duplicate -- we cannot decide
+				# OK / PARTIAL without it, so default OK on the count.
+				graded_status = "OK"
 
 	emailed_status = compute_emailed_status(term, image_number, graded_status)
 
@@ -289,6 +278,9 @@ def build_status_row(image_number: int, term: str,
 		"next_step": next_step,
 		"form_count": form_count,
 		"graded_count": graded_count,
+		"checkpoint_label": checkpoint_label,
+		"checkpoint_candidates": checkpoint_candidates,
+		"checkpoint_conflict_reason": checkpoint_conflict_reason,
 	}
 	return row
 
@@ -340,6 +332,11 @@ def compute_next_step(form_status: str, downloaded_status: str,
 		return "fix duplicate CSV"
 	if form_status == "MISSING":
 		return "add form CSV"
+	# Checkpoint conflict (parse failure, validation failure, or
+	# same-rank duplicate) needs operator triage before any action step
+	# can run. Surface a manual-fix verb instead of routing to grade.
+	if graded_status == "CONFLICT":
+		return "fix checkpoint"
 	# Download is non-interactive, so it is folded into the grade step:
 	# whenever the form CSV is OK but grading has not happened, the next
 	# action is "grade" (which auto-downloads first if needed).
@@ -442,6 +439,42 @@ def render_footer_warnings(term: str, rows: list = None) -> str:
 				)
 		if count_lines:
 			parts.append("\n".join(count_lines))
+
+		# Multi-checkpoint advisory: the dashboard auto-picked the
+		# deepest YAML, but operator should know which others are on
+		# disk so they can clean up stale partial-run files. Skip
+		# CONFLICT rows -- the CONFLICT line below already names the
+		# offending file and the operator's first action is to repair
+		# or delete it, not to clean up shallower checkpoints.
+		multi_lines = []
+		for r in rows:
+			if r["graded"] == "CONFLICT":
+				continue
+			candidates = r.get("checkpoint_candidates", [])
+			if len(candidates) <= 1:
+				continue
+			chosen_name = candidates[0].name
+			others = ", ".join(p.name for p in candidates[1:])
+			multi_lines.append(
+				f"image {r['image']}: using {r['checkpoint_label']} "
+				f"checkpoint {chosen_name}; also found: {others}"
+			)
+		if multi_lines:
+			parts.append("\n".join(multi_lines))
+
+		# CONFLICT lines name the offending file and the parser /
+		# validation reason. Regrade will refuse to run for these
+		# images until the operator deletes or repairs the file.
+		conflict_lines = []
+		for r in rows:
+			if r["graded"] != "CONFLICT":
+				continue
+			reason = r.get("checkpoint_conflict_reason") or "unknown"
+			conflict_lines.append(
+				f"image {r['image']}: CHECKPOINT CONFLICT: {reason}"
+			)
+		if conflict_lines:
+			parts.append("\n".join(conflict_lines))
 	root_csvs = find_repo_root_form_csvs()
 	if root_csvs:
 		# Only happens if auto-import was skipped or failed earlier.
@@ -501,15 +534,24 @@ def build_download_command(canonical_csv: pathlib.Path) -> list:
 
 
 #============================================
-def build_grade_command(image_number: int, term: str) -> list:
+def build_grade_command(image_number: int, term: str,
+		yaml_backup_file: pathlib.Path | None = None) -> list:
 	"""
 	Construct the argv list to invoke grade_protein_image.py for one image.
+
+	When `yaml_backup_file` is provided, append `--yaml-backup-file <path>`
+	so the grader resumes from that checkpoint via its existing flag.
+	Existing callers that omit the keyword get the wholesale grade command
+	unchanged.
 	"""
-	return [
+	command = [
 		sys.executable, GRADE_SCRIPT,
 		"-i", str(image_number),
 		"--term", term,
 	]
+	if yaml_backup_file is not None:
+		command.extend(["--yaml-backup-file", str(yaml_backup_file)])
+	return command
 
 
 #============================================
@@ -605,8 +647,31 @@ def run_step(term: str, image_number: int, step: str) -> int:
 				print("Aborted.")
 				return 1
 	elif step == "regrade":
-		command = build_grade_command(image_number, term)
 		image_dir = protein_images_path.get_term_image_dir(term, image_number)
+		# Auto-resume: pick the deepest valid checkpoint by precedence and
+		# pass its path through the existing --yaml-backup-file flag. If
+		# pick_checkpoint reports a conflict (parse failure, validation
+		# failure, or true same-rank duplicate) we abort non-zero so the
+		# operator can inspect / repair the offending file.
+		pick_result = grade_status.pick_checkpoint(image_dir, image_number)
+		if pick_result.conflict:
+			print(
+				f"Cannot regrade image {image_number:02d}: checkpoint conflict.\n"
+				f"  Reason: {pick_result.conflict_reason}\n"
+				"  Fix the file (delete or repair) and re-run."
+			)
+			candidate_paths = [str(hit.path) for hit in pick_result.candidates]
+			print("  Candidates: " + ", ".join(candidate_paths))
+			# Exit 2 (operator must repair the file) is distinct from
+			# exit 1 (user-visible "Aborted." after declining the
+			# overwrite prompt below) so callers / scripts can route
+			# the two cases differently if needed.
+			return 2
+		if pick_result.chosen is not None:
+			print(f"Resuming from {pick_result.chosen}")
+		command = build_grade_command(
+			image_number, term, yaml_backup_file=pick_result.chosen
+		)
 		graded_csv = image_dir / f"output-protein_image_{image_number:02d}.csv"
 		if graded_csv.is_file():
 			# When the dashboard auto-routed because the form CSV grew

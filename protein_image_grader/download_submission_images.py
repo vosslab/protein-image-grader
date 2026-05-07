@@ -493,32 +493,6 @@ def _extract_form_ruid_from_row(row: list, header: list,
 
 
 #============================================
-def _quarantine_row(quarantine_log_path: str, unresolved) -> None:
-	"""
-	Append one quarantine record to `<csv_dir>/quarantine.log`.
-
-	The top-N roster candidates carried on `unresolved` (when present)
-	are written one per indented line below the header so the operator
-	can triage straight from the log without re-parsing the form CSV.
-
-	Args:
-		quarantine_log_path: Absolute path to the per-CSV quarantine log.
-		unresolved: An `ruid_resolver.UnresolvedStudent` instance.
-	"""
-	line = (
-		f"form_ruid={unresolved.form_ruid!r} "
-		f"name={unresolved.first_name!r} {unresolved.last_name!r} "
-		f"username={unresolved.username!r} "
-		f"reason={unresolved.reason} "
-		f"score={unresolved.score:.3f}\n"
-	)
-	for cand_ruid, cand_name, cand_score in unresolved.candidates:
-		line += f"  candidate: {cand_ruid} {cand_name} score={cand_score:.3f}\n"
-	with open(quarantine_log_path, "a", encoding="ascii") as handle:
-		handle.write(line)
-
-
-#============================================
 def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: str,
 		image_raw_dir: str, archive_root: str, output_html: str, image_hashes: dict,
 		hashes_changed: list, matcher, assigned_ruids: set):
@@ -528,11 +502,12 @@ def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: 
 	Each row's typed Form RUID is resolved to the authoritative Roster
 	RUID via `ruid_resolver.resolve_form_row_to_roster_row(matcher, ...)`
 	before any image is saved or any filename is constructed (per
-	`docs/RUID_POLICY.md`). Rows that cannot be resolved are quarantined:
-	no image is saved, the row is appended to `<csv_dir>/quarantine.log`,
-	and the HTML page shows a placeholder so the operator sees the gap.
-	`assigned_ruids` is mutated by the resolver to detect same-run
-	duplicates across all CSVs in a `--all` run.
+	`docs/RUID_POLICY.md`). Any row that cannot be resolved aborts the
+	run with `RuntimeError`: an unresolved row means `roster.csv` is
+	stale (or the form RUID is wrong) and the operator must fix the
+	roster before re-running. `assigned_ruids` is mutated by the
+	resolver to detect same-run duplicates across all CSVs in a `--all`
+	run.
 	"""
 	if args.image_number == 0:
 		args.image_number = extract_number_in_range(os.path.basename(csvfile))
@@ -547,11 +522,6 @@ def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: 
 	col_first_idx = standard_indices["First Name"]
 	col_last_idx = standard_indices["Last Name"]
 	col_username_idx = standard_indices["Username"]
-
-	quarantine_log_path = os.path.join(
-		os.path.dirname(os.path.abspath(csvfile)) or ".",
-		"quarantine.log",
-	)
 
 	with open(output_html, "w") as output:
 		write_header(output, csvfile)
@@ -580,44 +550,26 @@ def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: 
 			)
 
 			if isinstance(result, ruid_resolver.UnresolvedStudent):
-				# Same-CSV duplicates are operator-fix problems (one student
-				# submitted twice, or two form rows mis-resolved to the same
-				# roster row). Either case would silently overwrite a saved
-				# image on the second hit, so stop and force triage instead
-				# of burying the warning in quarantine.log.
-				if result.reason == "duplicate":
-					raise RuntimeError(
-						f"Duplicate roster match in {csvfile}: "
-						f"form_ruid={form_ruid!r} name={first_name!r} {last_name!r} "
-						"resolved to a Roster RUID already claimed earlier in this CSV. "
-						"Edit the form CSV to remove the redundant row and re-run."
+				# An unresolved row means roster.csv is stale (or the
+				# typed Form RUID is wrong). Either way the operator
+				# must fix the roster before any image can be saved
+				# under an authoritative Roster RUID; aborting here
+				# beats silently dropping the row.
+				candidate_lines = ""
+				for cand_ruid, cand_name, cand_score in result.candidates:
+					candidate_lines += (
+						f"\n  candidate: {cand_ruid} {cand_name} "
+						f"score={cand_score:.3f}"
 					)
-				console.print(
-					f"quarantine: form_ruid={form_ruid!r} "
-					f"name={first_name!r} {last_name!r} "
-					f"reason={result.reason} score={result.score:.3f}",
-					style="bold red",
+				raise RuntimeError(
+					f"Unresolved Form RUID in {csvfile}: "
+					f"form_ruid={form_ruid!r} name={first_name!r} {last_name!r} "
+					f"username={username!r} reason={result.reason} "
+					f"score={result.score:.3f}. "
+					"roster.csv is stale or the typed RUID is wrong; "
+					"fix the roster (or the form CSV) and re-run."
+					f"{candidate_lines}"
 				)
-				_quarantine_row(quarantine_log_path, result)
-				output.write(
-					"<p style='color:red'><b>QUARANTINED</b>: "
-					f"form_ruid={form_ruid} "
-					f"name={first_name} {last_name} "
-					f"reason={result.reason}</p>\n"
-				)
-				# Still emit the non-image fields so the operator can
-				# eyeball what was submitted; skip image cells entirely.
-				for i, item in enumerate(row):
-					if len(item) < 1:
-						continue
-					if item.startswith('http'):
-						continue
-					if item.startswith('900') or item.startswith('960'):
-						continue
-					output.write(
-						f"<p><b>{header[i].strip()}</b>:&nbsp; {row[i].strip()}</p>\n"
-					)
-				continue
 
 			ruid = result.roster_ruid
 			if result.form_ruid and str(ruid) != result.form_ruid.strip():
