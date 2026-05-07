@@ -35,6 +35,21 @@
 	  `Protein_Images/semesters/<term>/email_log.yml`. The dashboard's
 	  `Emailed` column closes to `OK` only when every roster Student ID
 	  has status `sent` or `no_submission_sent` for the image.
+	- The orchestrator always runs `send_feedback_email.py` in
+	  dry-run mode first. Dry-run is end-to-end: for every student
+	  it builds the body, composes the AppleScript, and prints it.
+	  For the FIRST non-skipped student only, it dispatches a single
+	  preview copy of that AppleScript to the instructor address
+	  (`nvoss@roosevelt.edu`) with subject prefix
+	  `[DRY-RUN PREVIEW]`. The preview proves Mail.app and
+	  AppleScript work end-to-end before any student is touched; if
+	  it fails, the run halts with a stack trace and no `dry_run`
+	  rows are written. After a clean dry-run, when stdin is a TTY,
+	  `start_grading.py` prompts `Dry-run complete. Send for real
+	  now? [y/N]`. Answer `y` to re-run with `-e` and dispatch real
+	  feedback emails to every student. Direct invocations of
+	  `send_feedback_email.py` do not prompt; pass `-e/--send-email`
+	  explicitly to opt in to a real send.
 
 ## Inputs
 - Form CSVs:
@@ -47,7 +62,7 @@
 ## Outputs
 - Downloaded images (working):
 	- `Protein_Images/semesters/<term>/<image_dir>/raw/`
-	- `Protein_Images/semesters/<term>/<image_dir>/trim/` (with `--trim`)
+	- `Protein_Images/semesters/<term>/<image_dir>/trim/` (the orchestrator always passes `--trim --rotate`; direct invocations of `download_submission_images.py` produce trim/ only when `-t` is passed)
 - Downloaded images (archived):
 	- `Protein_Images/image_bank/<term>/<image_dir>/raw/`
 	- `Protein_Images/image_bank/<term>/<image_dir>/trim/`
@@ -60,7 +75,7 @@
 	- `Protein_Images/semesters/<term>/<image_dir>/downloaded_images.yml` (intermediate)
 	- `Protein_Images/semesters/<term>/<image_dir>/preprocess_save.yml` (intermediate)
 - Visual grading HTML:
-	- `Protein_Images/semesters/<term>/<image_dir>/profiles_image_NN.html`
+	- `Protein_Images/semesters/<term>/<image_dir>/protein_images_NN.html`
 - Unresolved-RUID handling:
 	- The downloader and the grader both raise `RuntimeError` on the
 	  first row whose Form RUID cannot be resolved against
@@ -103,7 +118,7 @@ output > post-images > post-questions > preprocess > duplicate-check > downloade
 Both the dashboard and the regrade router use the same picker. Dashboard behavior:
 
 - Picks the deepest valid file silently.
-- When more than one checkpoint exists, the footer prints `image NN: using <label> checkpoint <chosen.name>; also found: <comma-list>`. No prompt; the dashboard is non-interactive.
+- When more than one checkpoint exists AND the chosen file is shallower than `output-protein_image_NN.yml` (i.e. a crashed or in-flight run), the footer prints `image NN: using <label> checkpoint <chosen.name>; also found: <comma-list>`. When the chosen checkpoint is `output`, no advisory line is printed: the shallower `*_save.yml` files are normal scaffolding from the same successful run, not stale state, and listing them every dashboard refresh would be noise. No prompt; the dashboard is non-interactive.
 - When the deepest YAML fails `safe_load` or fails structural validation (must be a list of dicts, every entry has a non-empty `Student ID`, no duplicate Student IDs, `Protein Image Number` matches the requested image), the row reports `graded == "CONFLICT"` and the footer prints `image NN: CHECKPOINT CONFLICT: <reason>`.
 
 Regrade behavior:

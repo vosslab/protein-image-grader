@@ -52,7 +52,7 @@ def get_image_data(student_entry: dict, params: dict):
 			student_entry['Student ID'], params['image_number'], original_filename
 		)
 		output_filename = os.path.join(params['image_raw_dir'], saved_basename)
-		print(f"output_filename = {output_filename}")
+		print(f"output_filename = {os.path.relpath(output_filename)}")
 
 	elif len(file_search) > 1:
 		raise ValueError(f"Too many matches for file {output_filename_prefix}")
@@ -60,7 +60,7 @@ def get_image_data(student_entry: dict, params: dict):
 	else:
 		output_filename = file_search[0]
 		original_filename = output_filename[len(output_filename_prefix):]
-		print(f"Found file {output_filename}")
+		print(f"Found file {os.path.relpath(output_filename)}")
 		image_data = open(output_filename, 'rb')
 
 	return image_data, original_filename, output_filename
@@ -122,7 +122,7 @@ def download_and_process_image(student_entry: dict, params: dict) -> dict:
 #============================================
 def save_image(image_dict: dict, output_filename: str):
 	"""Save the processed image to a file."""
-	print(f"Saved image to {output_filename}")
+	print(f"Saved image to {os.path.relpath(output_filename)}")
 	image_dict['pil_image'].save(output_filename)
 	image_dict['pil_image'].close()
 

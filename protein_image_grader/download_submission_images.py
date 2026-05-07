@@ -61,8 +61,6 @@ def parse_args():
 	parser.add_argument('--archive-anyway', dest='archive_anyway', action='store_true',
 		help="Re-enable archive sync even when --output-dir is provided",
 		default=False)
-	parser.add_argument('-p', '--profiles-html', dest='profiles_html', type=str,
-		help="Output HTML file name", default=None)
 	parser.add_argument('--image-number', dest='image_number', default=0,
 		type=int, required=False,
 		help="Image number 1-20; with no -i, resolves canonical form CSV.")
@@ -231,8 +229,17 @@ def get_image_html_tag(image_url: str, ruid: int, args, image_dir: str,
 					image_hashes, md5hash, phash, archive_path
 				) or hashes_changed[0]
 
+	# HTML side-by-side rendering keys on file existence, not args.trim,
+	# so a previously-trimmed image dir still renders both panels even
+	# when the current run did not trim. Compute the expected trim path
+	# from the raw filename even when args.trim is off.
+	if not trim_path:
+		raw_basename_no_ext = os.path.splitext(os.path.basename(raw_path))[0]
+		trim_path = os.path.join(
+			image_dir, "trim", f"{raw_basename_no_ext}-trim.jpg"
+		)
 	html_tag = f"<img border='3' src='file://{raw_path}' height='250' />"
-	if args.trim and os.path.isfile(trim_path):
+	if os.path.isfile(trim_path):
 		html_tag += f"<img border='3' src='file://{trim_path}' height='350' />"
 
 	print('')
@@ -626,7 +633,29 @@ def write_html_from_student_tree(student_tree: list, output_html: str) -> None:
 			output_filename = student_entry.get('Output Filename', '')
 			if output_filename:
 				image_path = os.path.abspath(output_filename)
-				output.write(f"<img border='3' src='file://{image_path}' height='350' />\n")
+				output.write(f"<img border='3' src='file://{image_path}' height='250' />\n")
+				# Render the trim/rotate companion when one exists on
+				# disk, mirroring get_image_html_tag's side-by-side
+				# layout. Detection is purely file-existence based, so
+				# a grader run that did not trim still surfaces a
+				# trimmed copy left by an earlier downloader run.
+				# Assumes canonical layout: image_path is always under
+				# <image_dir>/raw/<basename>.<ext> and the matching
+				# trim is at <image_dir>/trim/<basename>-trim.jpg.
+				raw_dir = os.path.dirname(image_path)
+				image_dir_root = os.path.dirname(raw_dir)
+				raw_basename_no_ext = os.path.splitext(
+					os.path.basename(image_path)
+				)[0]
+				trim_path = os.path.join(
+					image_dir_root, "trim",
+					f"{raw_basename_no_ext}-trim.jpg",
+				)
+				if os.path.isfile(trim_path):
+					output.write(
+						f"<img border='3' src='file://{trim_path}' "
+						"height='350' />\n"
+					)
 
 			if student_id:
 				output.write(f"<p><b>Student ID</b>:&nbsp; {student_id}</p>\n")
@@ -702,9 +731,10 @@ def process_one_csv(csvfile: str, args, image_hashes: dict,
 	"""
 	Run the per-CSV pipeline: read CSV, resolve output dir, generate HTML.
 
-	Mutates args.image_number (resolved from the basename) and
-	args.profiles_html (per-CSV path) so generate_html sees the right
-	values; the bulk loop resets these between iterations.
+	Mutates args.image_number (resolved from the basename) so
+	generate_html sees the right value; the bulk loop resets it
+	between iterations. The per-image HTML output path is computed
+	from the canonical layout and passed to generate_html directly.
 
 	`matcher` is a shared `roster_matching.RosterMatcher` constructed by
 	main(); `assigned_ruids` is the per-CSV duplicate guard (main()
@@ -726,7 +756,7 @@ def process_one_csv(csvfile: str, args, image_hashes: dict,
 	if not os.path.isdir(image_dir):
 		os.makedirs(image_dir)
 	console.print(
-		f"  image {args.image_number:02d} -> {image_dir}",
+		f"  image {args.image_number:02d} -> {os.path.relpath(image_dir)}",
 		style="green")
 
 	# Set up image_raw_dir (always under image_dir for canonical layout).
@@ -742,16 +772,18 @@ def process_one_csv(csvfile: str, args, image_hashes: dict,
 		archive_root = str(archive_paths.make_archive_assignment_dir(
 			term, pathlib.Path(image_dir).name))
 
-	# profiles_html lands in the per-image folder per canonical layout.
-	profiles_html = os.path.join(
-		image_dir, f"profiles_image_{args.image_number:02d}.html")
-	args.profiles_html = profiles_html
+	# Per-image review HTML lands in the per-image folder per canonical
+	# layout. Filename is `protein_images_NN.html` (the legacy
+	# `profiles_*` name dated to a different downloader and was
+	# misleading here).
+	html_output = os.path.join(
+		image_dir, f"protein_images_{args.image_number:02d}.html")
 
 	generate_html(csvfile, header, data_tree, args, image_dir, image_raw_dir,
-		archive_root, profiles_html, image_hashes, hashes_changed,
+		archive_root, html_output, image_hashes, hashes_changed,
 		matcher, assigned_ruids)
 	if open_browser:
-		open_html_in_browser(profiles_html)
+		open_html_in_browser(html_output)
 
 
 #============================================
@@ -780,15 +812,15 @@ def main():
 	# CSV 01 and CSV 02 is normal (one submission per assignment),
 	# not a duplicate. Duplicate detection only catches two form rows
 	# inside the same CSV resolving to the same Roster RUID.
-	# Non-interactive: the downloader quarantines on miss instead of
-	# prompting.
+	# Non-interactive: the downloader raises on the first unresolved
+	# row (stale roster) instead of prompting.
 	term = protein_images_path.get_active_term(args.term)
 	roster = roster_matching.load_roster(
 		str(protein_images_path.get_roster_csv(term)))
 	matcher = roster_matching.RosterMatcher(roster=roster, interactive=False)
 
 	for csv_path in csv_paths:
-		console.print(f"=== {csv_path}", style="bold cyan")
+		console.print(f"=== {os.path.relpath(csv_path)}", style="bold cyan")
 		assigned_ruids: set = set()
 		process_one_csv(str(csv_path), args, image_hashes, hashes_changed,
 			open_browser, matcher, assigned_ruids)

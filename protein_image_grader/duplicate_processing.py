@@ -111,13 +111,16 @@ def load_image_hashes(file_path: str = None) -> dict:
 		file_path = str(protein_images_path.get_image_hashes_yaml())
 
 	if not os.path.isfile(file_path):
-		console.print(f"WARNING: image hashes file not found: {file_path}", style=warning_color)
+		console.print(
+			f"WARNING: image hashes file not found: {os.path.relpath(file_path)}",
+			style=warning_color,
+		)
 		return {'md5': {}, 'phash': {}}
 
 	with open(file_path, 'r') as f:
 		image_hashes = yaml.safe_load(f)
 	total_hashes = len(image_hashes['md5']) + len(image_hashes['phash'])
-	print(f"Loaded {total_hashes} image hashes from file {file_path}")
+	print(f"Loaded {total_hashes} image hashes from file {os.path.relpath(file_path)}")
 	return image_hashes
 
 #============================================

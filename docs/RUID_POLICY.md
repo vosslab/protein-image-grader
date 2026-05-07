@@ -43,7 +43,7 @@ The Form RUID is whatever the student typed at submission time. Students transpo
 - `Protein_Images/image_bank/<term>/<image_dir>/{raw,trim}/<RUID>-protein NN-...`
 - `Protein_Images/semesters/<term>/<image_dir>/output-protein_image_NN.csv` (Student ID column)
 - `Protein_Images/semesters/<term>/<image_dir>/blackboard_upload-protein_image_NN.csv`
-- HTML profile pages (`profiles_image_NN.html`) shown during review.
+- HTML review pages (`protein_images_NN.html`) shown during review.
 
 ## How the resolution works
 

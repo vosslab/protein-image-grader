@@ -394,7 +394,10 @@ def seed_or_reseed_spec_yaml(template_yaml: str, config_yaml: str) -> str:
 				f"or spec_dir template ({template_yaml})."
 			)
 		shutil.copy2(template_yaml, config_yaml)
-		console.print(f"[green]seeded[/green] {config_yaml} from {template_yaml}")
+		console.print(
+			f"[green]seeded[/green] {os.path.relpath(config_yaml)} "
+			f"from {os.path.relpath(template_yaml)}"
+		)
 		return "seeded"
 	if os.path.isfile(template_yaml) and (
 		os.path.getmtime(template_yaml) > os.path.getmtime(config_yaml)
@@ -403,7 +406,10 @@ def seed_or_reseed_spec_yaml(template_yaml: str, config_yaml: str) -> str:
 		# Operator-edited per-image copies are overwritten only when the template
 		# has been touched after that copy was last written.
 		shutil.copy2(template_yaml, config_yaml)
-		console.print(f"[yellow]reseeded[/yellow] {config_yaml} from {template_yaml}")
+		console.print(
+			f"[yellow]reseeded[/yellow] {os.path.relpath(config_yaml)} "
+			f"from {os.path.relpath(template_yaml)}"
+		)
 		return "reseeded"
 	return "kept"
 
@@ -792,7 +798,7 @@ def load_student_data(params: dict, read_only_config: dict) -> tuple:
 			yaml_tree, image_number=params["image_number"]
 		)
 		student_tree = _merge_yaml_into_form(form_tree, yaml_tree)
-		print(f"Resuming from {yaml_path}")
+		print(f"Resuming from {os.path.relpath(yaml_path)}")
 	else:
 		# Form CSV is still validated for duplicate Student IDs so the
 		# initial grade path also fails loudly on bad input rather than
@@ -910,9 +916,13 @@ def process_data(student_tree: list, params: dict, read_only_config_dict: dict) 
 
 	# Generate HTML for visual grading if enabled
 	if params["args"].make_html is True:
-		profiles_html = os.path.join(params["image_dir"], "profiles.html")
-		download_submission_images.write_html_from_student_tree(student_tree, profiles_html)
-		download_submission_images.open_html_in_browser(profiles_html)
+		image_number = params["args"].image_number
+		html_output = os.path.join(
+			params["image_dir"],
+			f"protein_images_{image_number:02d}.html",
+		)
+		download_submission_images.write_html_from_student_tree(student_tree, html_output)
+		download_submission_images.open_html_in_browser(html_output)
 
 	# Loop through each student entry and process image questions
 	console.print("\nProcess Image Questions", style='green')

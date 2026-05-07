@@ -649,12 +649,12 @@ def test_status_row_conflict_when_deepest_yaml_unparseable(tmp_path,
 	assert "image 08" in footer
 
 
-def test_status_row_multi_checkpoint_footer_lists_others(tmp_path,
+def test_status_row_multi_checkpoint_footer_silent_when_output_chosen(tmp_path,
 		monkeypatch):
-	# Two checkpoints on disk (output + post-questions). Dashboard
-	# picks the deepest (output) and a footer warning lists the
-	# shallower one so the operator knows the partial-run file is
-	# still around. No conflict; status is OK.
+	# When the chosen checkpoint is the final output-NN.yml, shallower
+	# *_save.yml files are normal scaffolding from the successful run
+	# -- not stale state -- so the footer must NOT list them. They
+	# would be noise on every dashboard refresh.
 	_install_fake_repo_root(monkeypatch, tmp_path)
 	skel = _make_term_skeleton(tmp_path, "spring_2026")
 	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_08-Membrane.csv"
@@ -681,13 +681,50 @@ def test_status_row_multi_checkpoint_footer_lists_others(tmp_path,
 	)
 	canonical_csvs = sg.find_canonical_form_csvs("spring_2026")
 	row = sg.build_status_row(8, "spring_2026", canonical_csvs)
-	# Status is OK because no conflict and graded_count == form_count.
 	assert row["graded"] == "OK"
 	assert row["checkpoint_label"] == "output"
 	assert len(row["checkpoint_candidates"]) == 2
 	footer = sg.render_footer_warnings("spring_2026", rows=[row])
+	# Output is the chosen checkpoint -> shallow files are silent.
+	assert "post-questions_save.yml" not in footer
+	assert "using output checkpoint" not in footer
+
+
+def test_status_row_multi_checkpoint_footer_lists_when_shallow_chosen(
+		tmp_path, monkeypatch):
+	# Crashed in-flight run: post-questions_save.yml is on disk but
+	# output-NN.yml is not. The footer DOES list shallower files
+	# alongside the chosen one so the operator can spot stale state.
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_08-Membrane.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	form_csv.write_text(
+		_form_csv_with_records(["900000001"], "PM"),
+		encoding="ascii",
+	)
+	image_dir = pip.get_term_image_dir("spring_2026", 8)
+	image_dir.mkdir(parents=True, exist_ok=True)
+	(image_dir / "raw").mkdir()
+	(image_dir / "raw" / "x.jpg").write_text("", encoding="ascii")
+	yaml_text = _output_yaml_complete_for(["900000001"], 8)
+	(image_dir / "post-questions_save.yml").write_text(
+		yaml_text, encoding="ascii"
+	)
+	(image_dir / "downloaded_images.yml").write_text(
+		yaml_text, encoding="ascii"
+	)
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n",
+		encoding="ascii",
+	)
+	canonical_csvs = sg.find_canonical_form_csvs("spring_2026")
+	row = sg.build_status_row(8, "spring_2026", canonical_csvs)
+	assert row["checkpoint_label"] == "post-questions"
+	footer = sg.render_footer_warnings("spring_2026", rows=[row])
 	assert "post-questions_save.yml" in footer
-	assert "using output checkpoint" in footer
+	assert "downloaded_images.yml" in footer
 
 
 def test_status_row_dashboard_does_not_call_input(tmp_path, monkeypatch):
@@ -942,3 +979,5 @@ def test_run_step_regrade_passes_output_yml_to_grader(tmp_path, monkeypatch):
 	assert "--yaml-backup-file" in argv
 	idx = argv.index("--yaml-backup-file")
 	assert argv[idx + 1] == str(output_yaml)
+
+

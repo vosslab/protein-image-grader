@@ -440,15 +440,22 @@ def render_footer_warnings(term: str, rows: list = None) -> str:
 		if count_lines:
 			parts.append("\n".join(count_lines))
 
-		# Multi-checkpoint advisory: the dashboard auto-picked the
-		# deepest YAML, but operator should know which others are on
-		# disk so they can clean up stale partial-run files. Skip
-		# CONFLICT rows -- the CONFLICT line below already names the
-		# offending file and the operator's first action is to repair
-		# or delete it, not to clean up shallower checkpoints.
+		# Multi-checkpoint advisory: only warn when the chosen file is
+		# NOT the final `output-protein_image_NN.yml`. When `output`
+		# is on disk, the shallower `*_save.yml` files are normal
+		# scaffolding written during a successful run and are not
+		# stale state -- listing them every dashboard refresh is just
+		# noise. Skip CONFLICT rows too; the CONFLICT line names the
+		# offending file directly.
 		multi_lines = []
 		for r in rows:
 			if r["graded"] == "CONFLICT":
+				continue
+			# .get() because some test rows are hand-built without
+			# this key; build_status_row always sets it for real
+			# callers. Treat missing as "not output" (advisory still
+			# fires for the suspicious case).
+			if r.get("checkpoint_label") == "output":
 				continue
 			candidates = r.get("checkpoint_candidates", [])
 			if len(candidates) <= 1:
@@ -530,7 +537,15 @@ def build_download_command(canonical_csv: pathlib.Path) -> list:
 	After Phase 0 the downloader infers its own output dir from the
 	canonical CSV path; we do not pass --output-dir here.
 	"""
-	return [sys.executable, DOWNLOAD_SCRIPT, "-i", str(canonical_csv)]
+	# --trim and --rotate are on by default through the orchestrator so
+	# the per-image HTML (`protein_images_NN.html`) shows the raw image
+	# next to the trimmed/rotated copy.
+	return [
+		sys.executable, DOWNLOAD_SCRIPT,
+		"-i", str(canonical_csv),
+		"--trim",
+		"--rotate",
+	]
 
 
 #============================================
@@ -608,8 +623,8 @@ def require_resources(term: str, step: str) -> None:
 	# blackboard_assignment_ids.txt is warning-only in v1.
 	bb_ids = protein_images_path.get_term_dir(term) / BB_ASSIGNMENT_IDS_FILENAME
 	if not bb_ids.is_file():
-		print(f"WARNING: {bb_ids.name} not found at {bb_ids} (upload not"
-			" implemented yet; ignoring).")
+		print(f"WARNING: {bb_ids.name} not found at {os.path.relpath(bb_ids)} "
+			"(upload not implemented yet; ignoring).")
 
 
 #============================================
@@ -660,7 +675,7 @@ def run_step(term: str, image_number: int, step: str) -> int:
 				f"  Reason: {pick_result.conflict_reason}\n"
 				"  Fix the file (delete or repair) and re-run."
 			)
-			candidate_paths = [str(hit.path) for hit in pick_result.candidates]
+			candidate_paths = [os.path.relpath(hit.path) for hit in pick_result.candidates]
 			print("  Candidates: " + ", ".join(candidate_paths))
 			# Exit 2 (operator must repair the file) is distinct from
 			# exit 1 (user-visible "Aborted." after declining the
@@ -668,7 +683,7 @@ def run_step(term: str, image_number: int, step: str) -> int:
 			# the two cases differently if needed.
 			return 2
 		if pick_result.chosen is not None:
-			print(f"Resuming from {pick_result.chosen}")
+			print(f"Resuming from {os.path.relpath(pick_result.chosen)}")
 		command = build_grade_command(
 			image_number, term, yaml_backup_file=pick_result.chosen
 		)
@@ -687,10 +702,7 @@ def run_step(term: str, image_number: int, step: str) -> int:
 					and graded_count < form_count):
 				new_rows = form_count - graded_count
 				prompt_text = (
-					f"Re-grade to pick up {new_rows} new row(s)?\n"
-					f"  ({graded_count} existing graded scores will be "
-					f"re-computed; any hand-edits to {graded_csv.name}\n"
-					f"  will not be preserved.)"
+					f"Re-grade to pick up {new_rows} new row(s)?"
 				)
 				ok = confirm_overwrite(prompt_text, default_yes=True)
 			else:
@@ -715,9 +727,34 @@ def run_step(term: str, image_number: int, step: str) -> int:
 	else:
 		raise ValueError(f"Unsupported step: {step}")
 
-	command_string = " ".join(command)
-	print(f"+ {command_string}")
+	# Render each argv token as a repo-relative path when it points at
+	# a file on disk; otherwise pass through verbatim. Keeps the echoed
+	# subprocess line readable without losing fidelity.
+	display_tokens = []
+	for token in command:
+		if os.path.isabs(token) and os.path.exists(token):
+			display_tokens.append(os.path.relpath(token))
+		else:
+			display_tokens.append(token)
+	print(f"+ {' '.join(display_tokens)}")
 	result = subprocess.run(command)
+
+	# Email step: after a clean dry-run, offer to promote to a real
+	# send. The orchestrator never invokes -e directly; the operator
+	# must explicitly answer the prompt. Only fires for the email
+	# step, only when the dry-run exited cleanly, and only when stdin
+	# is a TTY so scripted callers are not blocked.
+	if step == "email" and result.returncode == 0 and sys.stdin.isatty():
+		ok = confirm_overwrite(
+			"Dry-run complete. Send for real now?",
+			default_yes=False,
+		)
+		if ok:
+			real_command = command + ["-e"]
+			real_display = display_tokens + ["-e"]
+			print(f"+ {' '.join(real_display)}")
+			real_result = subprocess.run(real_command)
+			return real_result.returncode
 	return result.returncode
 
 

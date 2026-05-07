@@ -17,7 +17,6 @@ Protein_Images/
     <term>/                                 # e.g., spring_2026
       forms/
         BCHM_Prot_Img_NN-*.csv             # form submissions
-        quarantine.log                      # rows the resolver could not match (appended)
       roster.csv                            # student roster for the term
       email_log.yml                         # per-image email status log
       <image_dir>/                          # e.g., BCHM_Prot_Img_04_Active_Site
@@ -33,7 +32,7 @@ Protein_Images/
         output-protein_image_NN.yml         # final checkpoint (source of truth for graded records)
         output-protein_image_NN.csv         # exported grades (downstream of YAML)
         blackboard_upload-protein_image_NN.csv
-        profiles_image_NN.html              # review interface (generated)
+        protein_images_NN.html              # review interface (generated)
   image_bank/                               # canonical archive (cross-year plagiarism)
     <term>/
       <image_dir>/
