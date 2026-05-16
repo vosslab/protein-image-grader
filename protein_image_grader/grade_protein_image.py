@@ -5,6 +5,7 @@ import time
 import shutil
 import fnmatch
 import argparse
+import datetime
 from types import MappingProxyType
 
 # PIP3 modules
@@ -15,6 +16,8 @@ import rich.console
 
 # local repo modules
 import protein_image_grader.grade_status as grade_status
+import protein_image_grader.ruid_resolver as ruid_resolver
+import protein_image_grader.roster_matching as roster_matching
 import protein_image_grader.duplicate_processing as duplicate_processing
 import protein_image_grader.file_io_protein as file_io_protein
 import protein_image_grader.interactive_image_criteria_class as interactive_image_criteria_class
@@ -637,32 +640,117 @@ def load_yaml_config(params: dict) -> dict:
 
 
 #============================================
-def _validate_unique_form_student_ids(form_tree: list) -> None:
+def _parse_submission_timestamp(row: dict) -> datetime.datetime:
 	"""
-	Raise if two form rows share a Student ID.
+	Return the comparable submission timestamp for one form or YAML row.
 
-	One student must produce at most one record per image; resubmissions
-	are handled by the operator's manual contract (delete the cached
-	YAML row to fully regrade), not by silent re-grading.
+	Google Forms timestamps currently arrive as
+	`YYYY/MM/DD H:MM:SS AM EST`. The trailing timezone abbreviation is
+	not needed for ordering submissions inside one course form.
+
+	Args:
+		row: Student row carrying the canonical `timestamp` key.
+
+	Returns:
+		A naive datetime used only for newest-submission comparison.
+	"""
+	timestamp = row["timestamp"]
+	timestamp_without_zone = timestamp[:-4].strip()
+	parsed = datetime.datetime.strptime(timestamp_without_zone,
+		"%Y/%m/%d %I:%M:%S %p")
+	return parsed
+
+
+#============================================
+def _collapse_form_to_newest_submissions(form_tree: list) -> list:
+	"""
+	Keep only the newest form row for each Student ID.
+
+	Duplicate Student IDs normally mean a student submitted the same
+	assignment again. The newest timestamp is the row the grader should
+	process; older rows are ignored with a terminal notice so the
+	operator can still see what happened.
 
 	Args:
 		form_tree: List of student dicts as read from the form CSV.
 
-	Raises:
-		ValueError: when two rows carry the same Student ID; the message
-			lists both row indices to make hand-editing easy.
+	Returns:
+		A form tree with at most one row per Student ID.
 	"""
-	seen: dict = {}
+	entries_by_student: dict = {}
+	order: list = []
 	for index, row in enumerate(form_tree):
 		key = grade_status.student_key(row)
-		if key in seen:
-			raise ValueError(
-				f"duplicate Student ID {key!r} in form CSV at "
-				f"rows {seen[key]} and {index}; either remove the "
-				"older submission or delete the cached YAML row to "
-				"fully regrade this student."
+		parsed_timestamp = _parse_submission_timestamp(row)
+		if key not in entries_by_student:
+			entries_by_student[key] = (index, parsed_timestamp, row)
+			order.append(key)
+			continue
+		old_index, old_timestamp, old_row = entries_by_student[key]
+		if parsed_timestamp > old_timestamp:
+			print(
+				f"WARNING: duplicate Student ID {key!r} in form CSV at "
+				f"rows {old_index} and {index}; using newer row {index}."
 			)
-		seen[key] = index
+			entries_by_student[key] = (index, parsed_timestamp, row)
+		else:
+			print(
+				f"WARNING: duplicate Student ID {key!r} in form CSV at "
+				f"rows {old_index} and {index}; keeping newer row "
+				f"{old_index}."
+			)
+			entries_by_student[key] = (old_index, old_timestamp, old_row)
+	collapsed_tree = [entries_by_student[key][2] for key in order]
+	return collapsed_tree
+
+
+#============================================
+def _resolve_form_rows_to_roster_student_ids(form_tree: list,
+		student_ids_tree: list) -> list:
+	"""
+	Resolve form rows to authoritative roster Student IDs before merging.
+
+	The typed form RUID is untrusted. Resolve every row independently so
+	two submissions from the same student can both resolve to the same
+	roster row, then let `_collapse_form_to_newest_submissions` choose
+	the newest timestamp.
+	"""
+	roster = student_id_protein.build_roster_from_student_ids_tree(
+		student_ids_tree
+	)
+	matcher = roster_matching.RosterMatcher(
+		roster=roster,
+		interactive=True,
+		auto_threshold=0.90,
+		auto_gap=0.06,
+		candidate_count=5,
+	)
+	resolved_tree = []
+	for student_entry in form_tree:
+		student_entry["Form RUID"] = str(student_entry["Student ID"])
+		form_row = {
+			"form_ruid": str(student_entry["Student ID"]),
+			"first_name": student_entry["First Name"],
+			"last_name": student_entry["Last Name"],
+			"username": student_entry["Username"],
+		}
+		# Fresh assigned set per row: duplicate submissions are handled
+		# by newest-timestamp collapse, not by the resolver's same-run
+		# duplicate guard.
+		result = ruid_resolver.resolve_form_row_to_roster_row(
+			form_row, matcher, set(),
+		)
+		if isinstance(result, ruid_resolver.UnresolvedStudent):
+			raise RuntimeError(
+				f"Could not match a student to the roster: {student_entry}. "
+				"Please edit the CSV file and try again."
+			)
+		raw = roster[result.roster_ruid]["_raw"]
+		print(f"{result.roster_ruid} {result.full_name} <= "
+			f"{result.reason} score={result.score:.3f}")
+		student_id_protein.merge_student_records(student_entry, raw)
+		resolved_tree.append(student_entry)
+	return resolved_tree
 
 
 #============================================
@@ -670,17 +758,18 @@ def _merge_yaml_into_form(form_tree: list, yaml_tree: list) -> list:
 	"""
 	Merge a cached checkpoint YAML into the freshly read form CSV.
 
-	Identity is `Student ID` only (resubmissions are not auto-regraded).
-	For each form row whose Student ID is in the YAML, the merged row
-	starts from the YAML row and the form row only fills keys that are
-	MISSING from the YAML; existing YAML values (cached hashes,
-	statuses, deductions, scores) are never overwritten. Form rows
-	whose Student ID is not in the YAML pass through unchanged. YAML
-	rows whose Student ID is no longer in the form CSV are appended at
-	the end and a warning is emitted (rare; operator may have edited
-	the form CSV by hand).
+	Identity is `Student ID` after the form rows are collapsed to the
+	newest timestamp per student. For each form row whose Student ID is
+	in the YAML with the same timestamp, the merged row starts from the
+	YAML row and the form row only fills keys that are MISSING from the
+	YAML; existing YAML values (cached hashes, statuses, deductions,
+	scores) are never overwritten. If the form row has a newer timestamp
+	than the cached YAML row, the form row wins so the resubmission is
+	graded. Form rows whose Student ID is not in the YAML pass through
+	unchanged. YAML rows whose Student ID is no longer in the form CSV
+	are skipped with a warning; the current form CSV is the source of
+	truth for which submissions exist.
 
-	The form CSV is validated for duplicate Student IDs before merging;
 	YAML duplicates raise via `_validate_unique_yaml_student_ids` so the
 	helper can be called outside the normal `load_student_data` path.
 
@@ -689,13 +778,12 @@ def _merge_yaml_into_form(form_tree: list, yaml_tree: list) -> list:
 		yaml_tree: Cached checkpoint rows (drives the grading state).
 
 	Returns:
-		Merged tree, in form-row order, with yaml-only rows appended
-		at the end.
+		Merged tree, in form-row order.
 
 	Raises:
-		ValueError: on duplicate Student IDs in either tree.
+		ValueError: on duplicate Student IDs in the YAML tree.
 	"""
-	_validate_unique_form_student_ids(form_tree)
+	form_tree = _collapse_form_to_newest_submissions(form_tree)
 	_validate_unique_yaml_student_ids(yaml_tree)
 	yaml_index = {grade_status.student_key(entry): entry for entry in yaml_tree}
 
@@ -705,6 +793,17 @@ def _merge_yaml_into_form(form_tree: list, yaml_tree: list) -> list:
 		key = grade_status.student_key(form_row)
 		if key in yaml_index:
 			yaml_row = yaml_index[key]
+			form_timestamp = _parse_submission_timestamp(form_row)
+			yaml_timestamp = _parse_submission_timestamp(yaml_row)
+			if form_timestamp > yaml_timestamp:
+				print(
+					f"WARNING: newer submission for Student ID {key}; "
+					"grading latest form row instead of cached YAML row."
+				)
+				form_row["Force Image Download"] = True
+				merged_tree.append(form_row)
+				consumed_yaml_keys.add(key)
+				continue
 			merged_row = dict(yaml_row)
 			# Backfill: only keys NOT already in the YAML row may flow
 			# in from the form row. Existing YAML values (cached
@@ -717,12 +816,14 @@ def _merge_yaml_into_form(form_tree: list, yaml_tree: list) -> list:
 		else:
 			merged_tree.append(form_row)
 
-	# Append any YAML rows that no form row claimed; warn the operator.
+	# Skip YAML rows no form row claimed. They may be stale output, or a
+	# prior roster-resolved Student ID whose current form row has a
+	# different typed RUID. Appending them creates duplicate roster
+	# matches later in load_student_data.
 	for yaml_key, yaml_row in yaml_index.items():
 		if yaml_key in consumed_yaml_keys:
 			continue
-		print(f"WARNING: yaml-only student {yaml_key} (no matching form row)")
-		merged_tree.append(yaml_row)
+		print(f"WARNING: skipped yaml-only student {yaml_key} (no matching form row)")
 
 	return merged_tree
 
@@ -782,13 +883,26 @@ def load_student_data(params: dict, read_only_config: dict) -> tuple:
 	form_tree = file_io_protein.read_student_csv_data(
 		params["input_csv"], read_only_config
 	)
-
 	yaml_path = params["args"].yaml_backup_file
+	if yaml_path and not os.path.isfile(yaml_path):
+		raise FileNotFoundError(
+			f"Checkpoint YAML not found: {yaml_path}"
+		)
+
+	# Load roster before merging: typed form RUIDs are untrusted, so all
+	# resume/collapse decisions below must use authoritative roster RUIDs.
+	if not os.path.isfile(params["student_ids_csv"]):
+		raise ValueError(
+			f"Roster CSV not found: {params['student_ids_csv']}\n"
+			"Place the roster at repo root as `current_students.csv` or pass --roster."
+		)
+	student_ids_tree = file_io_protein.read_student_ids(params["student_ids_csv"])
+	form_tree = _resolve_form_rows_to_roster_student_ids(
+		form_tree, student_ids_tree
+	)
+	params["all_form_submissions"] = form_tree
+
 	if yaml_path:
-		if not os.path.isfile(yaml_path):
-			raise FileNotFoundError(
-				f"Checkpoint YAML not found: {yaml_path}"
-			)
 		with open(yaml_path, "r", encoding="utf-8") as handle:
 			yaml_tree = yaml.safe_load(handle)
 		# Validate before trusting the file. Image-number cross-check
@@ -800,23 +914,12 @@ def load_student_data(params: dict, read_only_config: dict) -> tuple:
 		student_tree = _merge_yaml_into_form(form_tree, yaml_tree)
 		print(f"Resuming from {os.path.relpath(yaml_path)}")
 	else:
-		# Form CSV is still validated for duplicate Student IDs so the
-		# initial grade path also fails loudly on bad input rather than
-		# silently grading one of the duplicates.
-		_validate_unique_form_student_ids(form_tree)
-		student_tree = form_tree
+		# Duplicate form rows are student resubmissions; grade the
+		# newest submission for each Student ID.
+		student_tree = _collapse_form_to_newest_submissions(form_tree)
 
 	# Quick timestamp check
 	timestamp_tools.check_due_date(student_tree[-1]['timestamp'], read_only_config)
-
-	# Load student IDs
-	if not os.path.isfile(params["student_ids_csv"]):
-		raise ValueError(
-			f"Roster CSV not found: {params['student_ids_csv']}\n"
-			"Place the roster at repo root as `current_students.csv` or pass --roster."
-		)
-	student_ids_tree = file_io_protein.read_student_ids(params["student_ids_csv"])
-	student_id_protein.match_lists_and_add_student_ids(student_ids_tree, student_tree)
 
 	#back up matched students
 	match_yaml = os.path.join(params["image_dir"], "matched_students.yml")
@@ -921,7 +1024,10 @@ def process_data(student_tree: list, params: dict, read_only_config_dict: dict) 
 			params["image_dir"],
 			f"protein_images_{image_number:02d}.html",
 		)
-		download_submission_images.write_html_from_student_tree(student_tree, html_output)
+		download_submission_images.write_html_from_student_tree(
+			student_tree, html_output,
+			all_submissions=params["all_form_submissions"],
+		)
 		download_submission_images.open_html_in_browser(html_output)
 
 	# Loop through each student entry and process image questions
@@ -957,4 +1063,3 @@ def main():
 
 	#final step must be doing a lot (!)
 	process_and_save(params, student_tree, read_only_config)
-

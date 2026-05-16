@@ -2,9 +2,10 @@
 Unit tests for protein_image_grader.grade_protein_image merge helpers.
 
 Covers the YAML+CSV merge logic that drives the checkpoint-aware
-resume system: identity by Student ID only, no-overwrite backfill of
-form-row keys into matched YAML rows, duplicate-key rejection on both
-sides, and YAML-only row preservation with a warning.
+resume system: identity by Student ID after keeping the newest form
+submission, no-overwrite backfill of form-row keys into matched YAML
+rows, duplicate-key rejection on the YAML side, and YAML-only row
+skipping with a warning.
 """
 
 # Standard Library
@@ -16,6 +17,7 @@ import yaml
 
 # local repo modules
 import protein_image_grader.grade_protein_image as gpi
+import protein_image_grader.student_id_protein as student_id_protein
 
 
 def _form_row(sid, first="Pat", last="Roe", **extra):
@@ -50,19 +52,75 @@ def _cached_yaml_row(sid, **extra):
 	return row
 
 
-# ---- _validate_unique_form_student_ids -----------------------------------
+def _roster_row(sid, first="Pat", last="Roe", username="patroe"):
+	return {
+		"Student ID": str(sid),
+		"First Name": first,
+		"Last Name": last,
+		"Username": username,
+		"Alias": "",
+	}
 
-def test_validate_form_rejects_duplicate_student_id():
-	form_tree = [_form_row("900000001"), _form_row("900000001")]
-	with pytest.raises(ValueError) as excinfo:
-		gpi._validate_unique_form_student_ids(form_tree)
-	assert "900000001" in str(excinfo.value)
+
+# ---- _collapse_form_to_newest_submissions --------------------------------
+
+def test_collapse_form_keeps_newest_duplicate_student_id(capsys):
+	form_tree = [
+		_form_row("900000001", timestamp="2026/04/16 1:00:00 PM EST"),
+		_form_row("900000001", timestamp="2026/04/16 1:05:00 PM EST",
+			first="New"),
+		_form_row("900000002", timestamp="2026/04/16 1:03:00 PM EST"),
+	]
+	collapsed = gpi._collapse_form_to_newest_submissions(form_tree)
+	assert [row["Student ID"] for row in collapsed] == [
+		"900000001", "900000002",
+	]
+	assert collapsed[0]["First Name"] == "New"
+	output = capsys.readouterr().out
+	assert "duplicate Student ID '900000001'" in output
 
 
-def test_validate_form_accepts_distinct_student_ids():
+def test_collapse_form_accepts_distinct_student_ids():
 	form_tree = [_form_row("900000001"), _form_row("900000002")]
-	# Should not raise; the two rows have distinct Student IDs.
-	gpi._validate_unique_form_student_ids(form_tree)
+	collapsed = gpi._collapse_form_to_newest_submissions(form_tree)
+	assert collapsed == form_tree
+
+
+def test_resolve_form_rows_rewrites_wrong_typed_ruid(monkeypatch):
+	monkeypatch.setattr(student_id_protein.time, "sleep", lambda _seconds: None)
+	form_tree = [
+		_form_row("900999999", first="Alice", last="Smith",
+			Username="asmith"),
+	]
+	student_ids_tree = [_roster_row(900000002, first="Alice",
+		last="Smith", username="asmith")]
+	resolved = gpi._resolve_form_rows_to_roster_student_ids(
+		form_tree, student_ids_tree,
+	)
+	assert resolved[0]["Student ID"] == "900000002"
+	assert resolved[0]["Form RUID"] == "900999999"
+	assert resolved[0]["Username"] == "asmith"
+
+
+def test_resolve_form_rows_allows_duplicate_submissions_before_collapse(monkeypatch):
+	monkeypatch.setattr(student_id_protein.time, "sleep", lambda _seconds: None)
+	form_tree = [
+		_form_row("900999999", first="Alice", last="Smith",
+			Username="asmith", timestamp="2026/04/16 1:00:00 PM EST"),
+		_form_row("900888888", first="Alice", last="Smith",
+			Username="asmith", timestamp="2026/04/16 1:05:00 PM EST"),
+	]
+	student_ids_tree = [_roster_row(900000002, first="Alice",
+		last="Smith", username="asmith")]
+	resolved = gpi._resolve_form_rows_to_roster_student_ids(
+		form_tree, student_ids_tree,
+	)
+	collapsed = gpi._collapse_form_to_newest_submissions(resolved)
+	assert [row["Student ID"] for row in resolved] == [
+		"900000002", "900000002",
+	]
+	assert len(collapsed) == 1
+	assert collapsed[0]["timestamp"] == "2026/04/16 1:05:00 PM EST"
 
 
 # ---- _merge_yaml_into_form -----------------------------------------------
@@ -123,10 +181,11 @@ def test_merge_preserves_yaml_value_when_form_has_same_key():
 	assert merged[0]["First Name"] == "Pat"  # YAML wins
 
 
-def test_merge_keeps_yaml_only_row_with_warning(capsys):
+def test_merge_skips_yaml_only_row_with_warning(capsys):
 	# YAML carries a Student ID no longer in the form CSV (operator
-	# removed the row). The cached row is preserved at the end of the
-	# merged tree and a warning is emitted.
+	# removed the row, or roster resolution previously rewrote a typed
+	# RUID). The cached row is skipped so it cannot create a duplicate
+	# roster match later.
 	form_tree = [_form_row("900000001"), _form_row("900000002")]
 	yaml_tree = [
 		_cached_yaml_row("900000001"),
@@ -134,27 +193,35 @@ def test_merge_keeps_yaml_only_row_with_warning(capsys):
 	]
 	merged = gpi._merge_yaml_into_form(form_tree, yaml_tree)
 	assert [row["Student ID"] for row in merged] == [
-		"900000001", "900000002", "900000099",
+		"900000001", "900000002",
 	]
 	output = capsys.readouterr().out
-	assert "yaml-only student 900000099" in output
+	assert "skipped yaml-only student 900000099" in output
 
 
-def test_merge_resubmission_is_not_auto_regraded():
-	# Operator workflow: a student submits the form again with a new
-	# timestamp. Identity is Student ID only, so the cached YAML row
-	# wins; the new form submission is silently absorbed. To regrade
-	# this student the operator must delete the YAML row.
+def test_merge_resubmission_is_auto_regraded_when_form_is_newer(capsys):
+	# A student submits the form again with a new timestamp. The form
+	# row wins over the cached YAML row so the new submission is graded.
 	cached_timestamp = "2026/04/16 1:00:00 PM EST"
 	resubmit_timestamp = "2026/05/01 9:30:00 AM EST"
 	form_tree = [_form_row("900000001", timestamp=resubmit_timestamp)]
 	yaml_tree = [_cached_yaml_row("900000001", timestamp=cached_timestamp)]
 	merged = gpi._merge_yaml_into_form(form_tree, yaml_tree)
-	# Merged row carries the cached YAML timestamp, not the resubmit.
-	# Behavioral assertion: the field equals the YAML fixture's value
-	# (whatever it is) rather than a hardcoded literal.
-	assert merged[0]["timestamp"] == yaml_tree[0]["timestamp"]
-	assert merged[0]["timestamp"] != resubmit_timestamp
+	assert merged[0]["timestamp"] == resubmit_timestamp
+	assert "Image Assessment Complete" not in merged[0]
+	assert merged[0]["Force Image Download"] is True
+	output = capsys.readouterr().out
+	assert "newer submission for Student ID 900000001" in output
+
+
+def test_merge_resubmission_uses_cached_yaml_when_timestamp_matches():
+	# Same timestamp means this is the same form row as the cached
+	# checkpoint. Reuse grading fields and keep the no-overwrite rule.
+	timestamp = "2026/04/16 1:00:00 PM EST"
+	form_tree = [_form_row("900000001", timestamp=timestamp)]
+	yaml_tree = [_cached_yaml_row("900000001", timestamp=timestamp)]
+	merged = gpi._merge_yaml_into_form(form_tree, yaml_tree)
+	assert merged[0]["timestamp"] == timestamp
 	assert merged[0]["Image Assessment Complete"] is True
 
 

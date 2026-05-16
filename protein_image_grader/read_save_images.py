@@ -36,6 +36,8 @@ def get_image_data(student_entry: dict, params: dict):
 	output_filename_prefix = os.path.join(params['image_raw_dir'], prefix_basename)
 
 	file_search = glob.glob(output_filename_prefix+"*")
+	if student_entry.get("Force Image Download") is True:
+		file_search = []
 	image_data = None
 	output_filename = None
 	original_filename = None
@@ -216,8 +218,10 @@ def read_and_save_student_images(student_tree: list, params: dict) -> None:
 
 		console.print(f"Processing image: {image_dict['original_filename']}")
 
-		# Ensure the image is saved if it's new
-		if not os.path.exists(image_dict['output_filename']):
+		# Forced downloads are newer resubmissions. Save them even
+		# when the original filename collides with an older raw file.
+		if (student_entry.get("Force Image Download") is True
+				or not os.path.exists(image_dict['output_filename'])):
 			save_image(image_dict, image_dict['output_filename'])
 		archive_image_if_needed(image_dict['output_filename'], params)
 		archive_dir = params.get('archive_assignment_dir')

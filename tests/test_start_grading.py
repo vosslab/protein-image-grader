@@ -405,9 +405,21 @@ def test_auto_import_accepts_superset_collision(tmp_path, monkeypatch, capsys):
 		_form_csv_text([r1, new1, r2, new2, r3]),
 		encoding="ascii",
 	)
+	original_replace = sg.os.replace
+	replace_calls = []
+
+	def fake_replace(replace_src, replace_dst):
+		replace_src = pathlib.Path(replace_src)
+		replace_dst = pathlib.Path(replace_dst)
+		replace_calls.append((replace_src, replace_dst))
+		assert replace_src.parent == replace_dst.parent
+		original_replace(replace_src, replace_dst)
+
+	monkeypatch.setattr(sg.os, "replace", fake_replace)
 	moves = sg.auto_import_repo_root_csvs("spring_2026")
 	assert len(moves) == 1
 	assert moves[0][2] == "replaced"
+	assert len(replace_calls) == 1
 	assert not src.exists()
 	# Canonical now matches the root CSV's contents: 5 data rows under
 	# one header. Parse with csv.reader so a future trailing-newline or
@@ -487,6 +499,66 @@ def test_status_row_partial_when_form_has_more_records(tmp_path, monkeypatch):
 	assert row["form_count"] == 5
 	assert row["graded_count"] == 3
 	assert row["next_step"] == "regrade"
+
+
+def test_status_row_counts_duplicate_form_student_once(tmp_path, monkeypatch):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_03-Hydrophobic.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	form_csv.write_text(
+		_form_csv_with_records(
+			["900000001", "900000002", "900000002"],
+			"PM",
+		),
+		encoding="ascii",
+	)
+	image_dir = pip.get_term_image_dir("spring_2026", 3)
+	image_dir.mkdir(parents=True, exist_ok=True)
+	(image_dir / "raw").mkdir()
+	(image_dir / "raw" / "x.jpg").write_text("", encoding="ascii")
+	(image_dir / "output-protein_image_03.yml").write_text(
+		_output_yaml_complete_for(["900000001", "900000002"], 3),
+		encoding="ascii",
+	)
+	(image_dir / "blackboard_upload-protein_image_03.csv").write_text(
+		"", encoding="ascii")
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n",
+		encoding="ascii",
+	)
+	canonical_csvs = sg.find_canonical_form_csvs("spring_2026")
+	row = sg.build_status_row(3, "spring_2026", canonical_csvs)
+	assert row["graded"] == "OK"
+	assert row["form_count"] == 2
+	assert row["graded_count"] == 2
+	assert row["next_step"] == "email"
+
+
+def test_count_form_records_collapses_wrong_typed_ruids_by_roster(tmp_path,
+		monkeypatch):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_03-Hydrophobic.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	form_csv.write_text(
+		_form_csv_text([
+			_row("900999999", "2026/04/16 1:00:00 PM EST",
+				first="Alice", last="Smith", email="asmith"),
+			_row("900888888", "2026/04/16 1:05:00 PM EST",
+				first="Alice", last="Smith", email="asmith"),
+		]),
+		encoding="ascii",
+	)
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n"
+		"Alice,Smith,asmith,900000002,\n",
+		encoding="ascii",
+	)
+	count = sg.count_form_records(form_csv, "spring_2026")
+	assert count == 1
 
 
 def test_compute_next_step_partial_routes_to_regrade():
@@ -979,5 +1051,3 @@ def test_run_step_regrade_passes_output_yml_to_grader(tmp_path, monkeypatch):
 	assert "--yaml-backup-file" in argv
 	idx = argv.index("--yaml-backup-file")
 	assert argv[idx + 1] == str(output_yaml)
-
-

@@ -14,6 +14,7 @@ import sys
 import shutil
 import pathlib
 import argparse
+import tempfile
 import subprocess
 
 # PIP3 modules
@@ -22,6 +23,7 @@ import tabulate
 # local repo modules
 import protein_image_grader.email_log as email_log
 import protein_image_grader.csv_compare as csv_compare
+import protein_image_grader.ruid_resolver as ruid_resolver
 import protein_image_grader.form_columns as form_columns
 import protein_image_grader.grade_status as grade_status
 import protein_image_grader.archive_paths as archive_paths
@@ -78,6 +80,27 @@ def find_canonical_form_csvs(term: str) -> dict:
 
 
 #============================================
+def replace_file_cross_device(src: pathlib.Path, dst: pathlib.Path) -> None:
+	"""
+	Replace `dst` with `src`, then remove `src`.
+
+	The final os.replace call must use a temporary file in dst.parent so
+	the overwrite stays atomic even when `src` lives on another filesystem.
+	"""
+	fd, tmp_path = tempfile.mkstemp(prefix=f".{dst.name}.", suffix=".tmp",
+		dir=str(dst.parent))
+	try:
+		os.close(fd)
+		shutil.copy2(src, tmp_path)
+		os.replace(tmp_path, dst)
+		os.unlink(src)
+	except Exception:
+		if os.path.exists(tmp_path):
+			os.unlink(tmp_path)
+		raise
+
+
+#============================================
 def auto_import_repo_root_csvs(term: str) -> list:
 	"""
 	Move repo-root BCHM_Prot_Img_##-*.csv files into the canonical forms
@@ -85,15 +108,16 @@ def auto_import_repo_root_csvs(term: str) -> list:
 	[(src_path, dst_path, action), ...] where action is one of
 	"moved", "identical", or "replaced".
 
-	Filesystem move only (shutil.move). Protein_Images/ is gitignored,
-	so `git mv` would be wrong here.
+	Filesystem move only (shutil.move or destination-local replace).
+	Protein_Images/ is gitignored, so `git mv` would be wrong here.
 
 	Collision policy (when a destination already exists):
 	  - byte-identical (SHA-256 match) -> delete the root copy silently
 	    with a "+ identical" notice; action="identical".
 	  - strict keyed superset (every shared (Student ID, timestamp)
 	    key has byte-identical row content; candidate may add more) ->
-	    overwrite canonical via os.replace; action="replaced".
+	    overwrite canonical via destination-local os.replace;
+	    action="replaced".
 	  - any other divergence (header drift, removed key, changed cells,
 	    duplicate key) -> raise FileExistsError naming the specific
 	    reason.
@@ -120,7 +144,7 @@ def auto_import_repo_root_csvs(term: str) -> list:
 		ok, reason, added = csv_compare.is_strict_form_superset(dst, src)
 		if ok:
 			print(f"+ superset, replaced canonical {src.name} ({reason})")
-			os.replace(str(src), str(dst))
+			replace_file_cross_device(src, dst)
 			results.append((src, dst, "replaced"))
 			continue
 		message = (
@@ -151,16 +175,26 @@ def detect_canonical_duplicates(term: str) -> dict:
 
 
 #============================================
-def count_form_records(canonical_csv: pathlib.Path) -> int:
+def _row_value(row: list, idx: int | None) -> str:
 	"""
-	Return the number of data rows in `canonical_csv` whose Student-ID
-	cell is non-empty.
+	Return one CSV cell, or empty string when the row is short.
+	"""
+	if idx is None or len(row) <= idx:
+		return ""
+	value = row[idx].strip()
+	return value
+
+
+#============================================
+def count_form_records(canonical_csv: pathlib.Path, term: str | None = None) -> int:
+	"""
+	Return the number of unique submitters in `canonical_csv`.
 
 	Uses form_columns.resolve_meta_columns(required={"Student ID"}) to
 	locate the Student-ID column; the form CSV may put it anywhere in
-	the first IDENTITY_PREFIX_COLUMNS header cells. Counts records,
-	not unique students -- the grader emits one output row per form
-	submission, so the dashboard comparison is record-vs-record.
+	the first IDENTITY_PREFIX_COLUMNS header cells. Duplicate Student
+	IDs are resubmissions; the grader keeps only the newest row per
+	student, so the dashboard comparison must count unique students too.
 	"""
 	with open(canonical_csv, "r", encoding="utf-8", newline="") as handle:
 		reader = csv.reader(handle)
@@ -171,12 +205,41 @@ def count_form_records(canonical_csv: pathlib.Path) -> int:
 	resolved = form_columns.resolve_meta_columns(header,
 		required={"Student ID"})
 	id_idx = resolved["Student ID"]
-	count = 0
+	student_ids: set = set()
+	matcher = None
+	if term is not None:
+		roster_csv = protein_images_path.get_roster_csv(term)
+		if roster_csv.is_file():
+			roster = roster_matching.read_roster(str(roster_csv))
+			matcher = roster_matching.RosterMatcher(
+				roster=roster,
+				interactive=False,
+				auto_threshold=0.90,
+				auto_gap=0.06,
+				candidate_count=5,
+			)
+	username_idx = resolved.get("Username")
+	first_idx = resolved.get("First Name")
+	last_idx = resolved.get("Last Name")
 	for row in all_rows[1:]:
 		if len(row) <= id_idx:
 			continue
-		if row[id_idx].strip():
-			count += 1
+		student_id = _row_value(row, id_idx)
+		if student_id:
+			if matcher is not None:
+				form_row = {
+					"form_ruid": student_id,
+					"first_name": _row_value(row, first_idx),
+					"last_name": _row_value(row, last_idx),
+					"username": _row_value(row, username_idx),
+				}
+				result = ruid_resolver.resolve_form_row_to_roster_row(
+					form_row, matcher, set(),
+				)
+				if isinstance(result, ruid_resolver.ResolvedStudent):
+					student_id = str(result.roster_ruid)
+			student_ids.add(student_id)
+	count = len(student_ids)
 	return count
 
 
@@ -250,7 +313,7 @@ def build_status_row(image_number: int, term: str,
 			if graded_count == 0:
 				graded_status = "MISSING"
 			elif form_status == "OK":
-				form_count = count_form_records(csv_matches[0])
+				form_count = count_form_records(csv_matches[0], term)
 				# Strict less-than -> PARTIAL. Equal stays OK.
 				# More-graded-than-form is handled in
 				# render_footer_warnings as a stale-output warning.

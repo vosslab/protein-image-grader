@@ -413,6 +413,38 @@ def test_generate_html_uses_roster_ruid(monkeypatch, tmp_path):
 		assert name.endswith("-trim.jpg")
 
 
+def test_write_html_from_student_tree_lists_all_submission_timestamps(tmp_path):
+	html_path = tmp_path / "protein_images_03.html"
+	student_tree = [{
+		"Student ID": "900000002",
+		"First Name": "Alice",
+		"Last Name": "Smith",
+		"timestamp": "2026/04/16 1:05:00 PM EST",
+	}]
+	all_submissions = [
+		{
+			"Student ID": "900000002",
+			"Form RUID": "900999999",
+			"timestamp": "2026/04/16 1:00:00 PM EST",
+			"image url": "https://drive/old",
+		},
+		{
+			"Student ID": "900000002",
+			"Form RUID": "900888888",
+			"timestamp": "2026/04/16 1:05:00 PM EST",
+			"image url": "https://drive/new",
+		},
+	]
+	dsi.write_html_from_student_tree(
+		student_tree, str(html_path), all_submissions=all_submissions,
+	)
+	html = html_path.read_text(encoding="utf-8")
+	assert "2026/04/16 1:00:00 PM EST (Form RUID 900999999)" in html
+	assert "2026/04/16 1:05:00 PM EST (Form RUID 900888888) latest" in html
+	assert "https://drive/old" in html
+	assert "https://drive/new" in html
+
+
 def test_generate_html_raises_on_unresolved_row(monkeypatch, tmp_path):
 	"""
 	An unresolved Form RUID means roster.csv is stale (or the typed

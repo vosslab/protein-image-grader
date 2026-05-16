@@ -107,6 +107,80 @@ def test_get_image_data_cache_miss_uses_canonical_shape(tmp_path, monkeypatch):
 	assert len(calls) == 1
 
 
+def test_get_image_data_force_download_ignores_cache(tmp_path, monkeypatch):
+	image_raw_dir = tmp_path / "raw"
+	image_raw_dir.mkdir()
+	saved_name = image_filename.build_raw_image_filename(
+		ruid=900000002, image_number=1, original_filename="Old.PNG"
+	)
+	(image_raw_dir / saved_name).write_bytes(b"\x89PNG\r\n\x1a\n")
+
+	def _fake_file_id(url):
+		return "NEW_FILE_ID"
+
+	calls = []
+	def _fake_download(file_id):
+		calls.append(file_id)
+		return io.BytesIO(b"\x89PNG\r\n\x1a\n"), "New.PNG"
+
+	monkeypatch.setattr(
+		read_save_images.google_drive_image_utils,
+		"get_file_id_from_google_drive_url", _fake_file_id,
+	)
+	monkeypatch.setattr(
+		read_save_images.google_drive_image_utils, "download_image", _fake_download
+	)
+
+	entry = _student_entry()
+	entry["Force Image Download"] = True
+	params = _params(image_raw_dir)
+
+	_image_data, original_filename, output_filename = read_save_images.get_image_data(
+		entry, params
+	)
+
+	assert original_filename == "New.PNG"
+	assert os.path.basename(output_filename).endswith("-new.png")
+	assert calls == ["NEW_FILE_ID"]
+
+
+def test_read_and_save_force_download_overwrites_same_filename(tmp_path, monkeypatch):
+	image_raw_dir = tmp_path / "raw"
+	image_raw_dir.mkdir()
+	output_path = image_raw_dir / "900000002-protein01-same.png"
+	output_path.write_text("old", encoding="ascii")
+
+	def _fake_download_and_process(student_entry, params):
+		student_entry.update({
+			"Output Filename": str(output_path),
+			"Original Filename": "same.png",
+			"128-bit MD5 Hash": "abc",
+			"Perceptual Hash": "def",
+			"Image Format": "PNG",
+		})
+		return {
+			"output_filename": str(output_path),
+			"original_filename": "same.png",
+		}
+
+	def _fake_save(image_dict, output_filename):
+		path = pathlib.Path(output_filename)
+		path.write_text("new", encoding="ascii")
+
+	monkeypatch.setattr(
+		read_save_images, "download_and_process_image",
+		_fake_download_and_process,
+	)
+	monkeypatch.setattr(read_save_images, "save_image", _fake_save)
+
+	entry = _student_entry()
+	entry["Force Image Download"] = True
+	params = _params(image_raw_dir)
+	read_save_images.read_and_save_student_images([entry], params)
+
+	assert output_path.read_text(encoding="ascii") == "new"
+
+
 def test_downloader_and_grader_agree_on_filename_shape():
 	# Round-trip: downloader.format_filename and the grader's prefix builder
 	# must agree, so a file the downloader saves is found by the grader's

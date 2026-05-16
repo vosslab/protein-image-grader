@@ -610,13 +610,71 @@ def open_html_in_browser(html_path: str):
 	os.system(f"open {html_path}")
 
 #============================================
-def write_html_from_student_tree(student_tree: list, output_html: str) -> None:
+def _submission_history_by_student(all_submissions: list | None) -> dict:
+	"""
+	Return {Student ID: [submission rows]} for form rows in original order.
+	"""
+	history: dict = {}
+	if all_submissions is None:
+		return history
+	for row in all_submissions:
+		student_id = str(row.get("Student ID", "")).strip()
+		if not student_id:
+			continue
+		if student_id not in history:
+			history[student_id] = []
+		history[student_id].append(row)
+	return history
+
+
+#============================================
+def _write_submission_history(output, student_entry: dict,
+		history_by_student: dict) -> None:
+	"""
+	Write timestamped form-submission history for one student.
+	"""
+	student_id = str(student_entry.get("Student ID", "")).strip()
+	if not student_id:
+		return
+	submissions = history_by_student.get(student_id, [])
+	if len(submissions) == 0:
+		return
+	if len(submissions) == 1:
+		label = "Submission"
+	else:
+		label = "Submissions"
+	output.write(f"<p><b>{label}</b>:</p>\n")
+	output.write("<ul>\n")
+	latest_timestamp = student_entry.get("timestamp", "")
+	for submission in submissions:
+		timestamp = submission.get("timestamp", "")
+		image_url = submission.get("image url", "")
+		form_ruid = submission.get("Form RUID", "")
+		marker = ""
+		if timestamp == latest_timestamp:
+			marker = " latest"
+		if form_ruid:
+			timestamp = f"{timestamp} (Form RUID {form_ruid})"
+		if image_url:
+			output.write(
+				f"<li>{timestamp}{marker}: "
+				f"<a href='{image_url}'>Drive image</a></li>\n"
+			)
+		else:
+			output.write(f"<li>{timestamp}{marker}</li>\n")
+	output.write("</ul>\n")
+
+
+#============================================
+def write_html_from_student_tree(student_tree: list, output_html: str,
+		all_submissions: list | None = None) -> None:
 	"""
 	Write an HTML file using a student_tree list that already includes output filenames.
 	"""
 	output_dir = os.path.dirname(output_html)
 	if output_dir and not os.path.isdir(output_dir):
 		os.makedirs(output_dir)
+	history_by_student = _submission_history_by_student(all_submissions)
 
 	with open(output_html, "w") as output:
 		write_header(output, output_html)
@@ -661,6 +719,10 @@ def write_html_from_student_tree(student_tree: list, output_html: str) -> None:
 				output.write(f"<p><b>Student ID</b>:&nbsp; {student_id}</p>\n")
 			if first_name or last_name:
 				output.write(f"<p><b>Student</b>:&nbsp; {first_name} {last_name}</p>\n")
+			timestamp = student_entry.get('timestamp', '')
+			if timestamp:
+				output.write(f"<p><b>Graded Timestamp</b>:&nbsp; {timestamp}</p>\n")
+			_write_submission_history(output, student_entry, history_by_student)
 			if original_filename:
 				output.write(f"<p><b>Original Filename</b>:&nbsp; {original_filename}</p>\n")
 	return
@@ -828,4 +890,3 @@ def main():
 	if hashes_changed[0]:
 		with open(image_hashes_yaml, 'w') as f:
 			yaml.dump(image_hashes, f)
-

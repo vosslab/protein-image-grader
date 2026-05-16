@@ -95,7 +95,7 @@ The grader resumes from a cached YAML checkpoint when `start_grading.py` routes 
 | Delete `<Question Name> Status` (drop the key) | Re-prompt that one CSV question. All other cached state stays. |
 | Delete the entire student YAML row | Treat the student as completely new. The full pipeline runs for that student on the next regrade. |
 
-Each lever controls only the work it describes. Hash- and download-forcing behavior is intentionally not promised here -- the existing image cache keys on `Image Format`, but the supported lever is to clear the field directly. To regrade a resubmission from an already-graded student, delete that student's YAML row; the merge keys identity on `Student ID` only and the cached row otherwise wins.
+Each lever controls only the work it describes. Hash- and download-forcing behavior is intentionally not promised here -- the existing image cache keys on `Image Format`, but the supported lever is to clear the field directly. When a form CSV has multiple rows for the same `Student ID`, the grader treats them as resubmissions and keeps the newest timestamp. On a regrade, a newer form timestamp also beats the cached YAML row so the resubmission is graded automatically; same-timestamp rows still reuse cached grading.
 
 ## Checkpoint files and resumption
 The grader writes per-stage checkpoint YAMLs into each `<image_dir>/` so a crashed or interrupted run leaves the deepest reached state on disk. All six files share the same shape (a flat list of student dicts) but populate progressively richer fields. The table below lists files in the order the grader writes them during a normal run; `output-protein_image_NN.yml` is the deepest:
