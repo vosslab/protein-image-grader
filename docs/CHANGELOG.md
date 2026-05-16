@@ -13,6 +13,10 @@
 - `protein_image_grader/read_save_images.py` forced newer-resubmission downloads now overwrite an existing same-name raw file instead of only updating the in-memory image data. This keeps the visual-grading HTML and later file-based processing pointed at the actual latest submission.
 - `protein_image_grader/start_grading.py` dashboard form counts now resolve typed Form RUIDs through `roster.csv` before counting unique submitters, matching the grader's authoritative roster-RUID collapse policy.
 - `protein_image_grader/grade_protein_image.py` now preserves each row's typed `Form RUID` before roster resolution and passes roster-resolved submission history to `protein_images_NN.html`, so wrong-RUID submissions still show their timestamp history under the displayed roster RUID.
+- `protein_image_grader/download_submission_images.py` `write_html_from_student_tree` now inserts two `<hr />` lines between student blocks in `protein_images_NN.html` so the visual-grading page has a clearer boundary between one student's images and the next student's name.
+- `protein_image_grader/download_submission_images.py` visual-grading image tags are clickable again. Both downloader-generated and grader-generated `protein_images_NN.html` wrap raw and trimmed images in links to their full local `file://` URLs so clicking an image opens it for zooming.
+- `protein_image_grader/download_submission_images.py` clickable visual-grading image links now include `target='_blank' rel='noopener'` so raw and trimmed images open in a new window/tab.
+- `protein_image_grader/start_grading.py` and `protein_image_grader/grade_protein_image.py` now render resume checkpoint paths through the symlink-aware `file_io_protein._short_path` helper. Terminal output uses `Protein_Images/...` instead of unreadable `../../../../Volumes/...` paths when semester data is reached through the repo symlink.
 
 ### Developer Tests and Notes
 - `tests/test_start_grading.py` superset-collision coverage now monkeypatches `os.replace` to assert the final atomic replace uses a source temp file in the same directory as the destination CSV.
@@ -25,6 +29,10 @@
 - `tests/test_read_save_images.py` now covers forced-download overwrite when the new image reuses the old original filename.
 - `tests/test_start_grading.py` now covers dashboard counting where two wrong typed RUIDs resolve to one roster student.
 - `tests/test_download_submission_images.py` now covers submission-history HTML for roster-resolved rows carrying distinct typed `Form RUID` values.
+- `tests/test_download_submission_images.py` now covers the double-`<hr />` separator between student blocks in visual-grading HTML.
+- `tests/test_download_submission_images.py` now covers clickable image links in grader-generated visual HTML.
+- `tests/test_download_submission_images.py` now asserts clickable visual HTML image links open with `target='_blank'`.
+- `tests/test_start_grading.py` and `tests/test_grade_protein_image.py` now cover symlink-shortened resume checkpoint output.
 
 ## 2026-05-10
 

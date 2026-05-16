@@ -912,7 +912,7 @@ def load_student_data(params: dict, read_only_config: dict) -> tuple:
 			yaml_tree, image_number=params["image_number"]
 		)
 		student_tree = _merge_yaml_into_form(form_tree, yaml_tree)
-		print(f"Resuming from {os.path.relpath(yaml_path)}")
+		print(f"Resuming from {file_io_protein._short_path(yaml_path)}")
 	else:
 		# Duplicate form rows are student resubmissions; grade the
 		# newest submission for each Student ID.

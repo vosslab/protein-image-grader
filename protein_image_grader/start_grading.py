@@ -26,6 +26,7 @@ import protein_image_grader.csv_compare as csv_compare
 import protein_image_grader.ruid_resolver as ruid_resolver
 import protein_image_grader.form_columns as form_columns
 import protein_image_grader.grade_status as grade_status
+import protein_image_grader.file_io_protein as file_io_protein
 import protein_image_grader.archive_paths as archive_paths
 import protein_image_grader.roster_matching as roster_matching
 import protein_image_grader.protein_images_path as protein_images_path
@@ -738,7 +739,10 @@ def run_step(term: str, image_number: int, step: str) -> int:
 				f"  Reason: {pick_result.conflict_reason}\n"
 				"  Fix the file (delete or repair) and re-run."
 			)
-			candidate_paths = [os.path.relpath(hit.path) for hit in pick_result.candidates]
+			candidate_paths = [
+				file_io_protein._short_path(str(hit.path))
+				for hit in pick_result.candidates
+			]
 			print("  Candidates: " + ", ".join(candidate_paths))
 			# Exit 2 (operator must repair the file) is distinct from
 			# exit 1 (user-visible "Aborted." after declining the
@@ -746,7 +750,10 @@ def run_step(term: str, image_number: int, step: str) -> int:
 			# the two cases differently if needed.
 			return 2
 		if pick_result.chosen is not None:
-			print(f"Resuming from {os.path.relpath(pick_result.chosen)}")
+			print(
+				f"Resuming from "
+				f"{file_io_protein._short_path(str(pick_result.chosen))}"
+			)
 		command = build_grade_command(
 			image_number, term, yaml_backup_file=pick_result.chosen
 		)
@@ -796,7 +803,7 @@ def run_step(term: str, image_number: int, step: str) -> int:
 	display_tokens = []
 	for token in command:
 		if os.path.isabs(token) and os.path.exists(token):
-			display_tokens.append(os.path.relpath(token))
+			display_tokens.append(file_io_protein._short_path(token))
 		else:
 			display_tokens.append(token)
 	print(f"+ {' '.join(display_tokens)}")

@@ -238,9 +238,19 @@ def get_image_html_tag(image_url: str, ruid: int, args, image_dir: str,
 		trim_path = os.path.join(
 			image_dir, "trim", f"{raw_basename_no_ext}-trim.jpg"
 		)
-	html_tag = f"<img border='3' src='file://{raw_path}' height='250' />"
+	raw_url = f"file://{raw_path}"
+	html_tag = (
+		f"<a href='{raw_url}' target='_blank' rel='noopener'>"
+		f"<img border='3' src='{raw_url}' height='250' />"
+		"</a>"
+	)
 	if os.path.isfile(trim_path):
-		html_tag += f"<img border='3' src='file://{trim_path}' height='350' />"
+		trim_url = f"file://{trim_path}"
+		html_tag += (
+			f"<a href='{trim_url}' target='_blank' rel='noopener'>"
+			f"<img border='3' src='{trim_url}' height='350' />"
+			"</a>"
+		)
 
 	print('')
 	return html_tag
@@ -682,7 +692,10 @@ def write_html_from_student_tree(student_tree: list, output_html: str,
 		for student_entry in student_tree:
 			count += 1
 			if count > 1:
-				output.write('<br/><p style="page-break-before: always"><br/></p>\n')
+				output.write(
+					"<hr />\n<hr />\n"
+					'<br/><p style="page-break-before: always"><br/></p>\n'
+				)
 
 			student_id = student_entry.get('Student ID', '')
 			first_name = student_entry.get('First Name', '')
@@ -691,7 +704,12 @@ def write_html_from_student_tree(student_tree: list, output_html: str,
 			output_filename = student_entry.get('Output Filename', '')
 			if output_filename:
 				image_path = os.path.abspath(output_filename)
-				output.write(f"<img border='3' src='file://{image_path}' height='250' />\n")
+				image_url = f"file://{image_path}"
+				output.write(
+					f"<a href='{image_url}' target='_blank' rel='noopener'>"
+					f"<img border='3' src='{image_url}' height='250' />"
+					"</a>\n"
+				)
 				# Render the trim/rotate companion when one exists on
 				# disk, mirroring get_image_html_tag's side-by-side
 				# layout. Detection is purely file-existence based, so
@@ -710,9 +728,12 @@ def write_html_from_student_tree(student_tree: list, output_html: str,
 					f"{raw_basename_no_ext}-trim.jpg",
 				)
 				if os.path.isfile(trim_path):
+					trim_url = f"file://{trim_path}"
 					output.write(
-						f"<img border='3' src='file://{trim_path}' "
-						"height='350' />\n"
+						f"<a href='{trim_url}' target='_blank' rel='noopener'>"
+						f"<img border='3' src='{trim_url}' "
+						"height='350' />"
+						"</a>\n"
 					)
 
 			if student_id:

@@ -445,6 +445,42 @@ def test_write_html_from_student_tree_lists_all_submission_timestamps(tmp_path):
 	assert "https://drive/new" in html
 
 
+def test_write_html_from_student_tree_separates_students_with_double_hr(tmp_path):
+	html_path = tmp_path / "protein_images_03.html"
+	student_tree = [
+		{
+			"Student ID": "900000001",
+			"First Name": "Alice",
+			"Last Name": "Smith",
+		},
+		{
+			"Student ID": "900000002",
+			"First Name": "Bob",
+			"Last Name": "Jones",
+		},
+	]
+	dsi.write_html_from_student_tree(student_tree, str(html_path))
+	html = html_path.read_text(encoding="utf-8")
+	assert "<hr />\n<hr />" in html
+
+
+def test_write_html_from_student_tree_makes_images_clickable(tmp_path):
+	image_raw_dir = tmp_path / "image_03" / "raw"
+	image_raw_dir.mkdir(parents=True)
+	raw_path = image_raw_dir / "900000001-protein03-image.png"
+	raw_path.write_text("", encoding="ascii")
+	html_path = tmp_path / "protein_images_03.html"
+	student_tree = [{
+		"Student ID": "900000001",
+		"Output Filename": str(raw_path),
+	}]
+	dsi.write_html_from_student_tree(student_tree, str(html_path))
+	html = html_path.read_text(encoding="utf-8")
+	image_url = f"file://{raw_path}"
+	assert f"<a href='{image_url}' target='_blank' rel='noopener'><img" in html
+	assert f"src='{image_url}'" in html
+
+
 def test_generate_html_raises_on_unresolved_row(monkeypatch, tmp_path):
 	"""
 	An unresolved Form RUID means roster.csv is stale (or the typed

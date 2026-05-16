@@ -1051,3 +1051,50 @@ def test_run_step_regrade_passes_output_yml_to_grader(tmp_path, monkeypatch):
 	assert "--yaml-backup-file" in argv
 	idx = argv.index("--yaml-backup-file")
 	assert argv[idx + 1] == str(output_yaml)
+
+
+def test_run_step_regrade_echo_uses_symlink_short_path(tmp_path,
+		monkeypatch, capsys):
+	real_root = tmp_path / "external"
+	repo_root = tmp_path / "repo"
+	real_root.mkdir()
+	repo_root.mkdir()
+	protein_images_link = repo_root / pip.PROTEIN_IMAGES_NAME
+	protein_images_link.symlink_to(real_root / pip.PROTEIN_IMAGES_NAME,
+		target_is_directory=True)
+	(real_root / pip.PROTEIN_IMAGES_NAME).mkdir()
+	monkeypatch.chdir(repo_root)
+	_install_fake_repo_root(monkeypatch, repo_root)
+	skel = _make_term_skeleton(repo_root, "spring_2026")
+	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_08-Membrane.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	form_csv.write_text(
+		_form_csv_with_records(["900000001"], "PM"),
+		encoding="ascii",
+	)
+	image_dir = pip.get_term_image_dir("spring_2026", 8)
+	image_dir.mkdir(parents=True, exist_ok=True)
+	(image_dir / "raw").mkdir()
+	(image_dir / "raw" / "x.jpg").write_text("", encoding="ascii")
+	output_yaml = image_dir / "output-protein_image_08.yml"
+	output_yaml.write_text(
+		_output_yaml_complete_for(["900000001"], 8),
+		encoding="ascii",
+	)
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n",
+		encoding="ascii",
+	)
+
+	def _capture_subprocess(argv, *_a, **_k):
+		return types.SimpleNamespace(returncode=0)
+
+	monkeypatch.setattr("subprocess.run", _capture_subprocess)
+	sg.run_step("spring_2026", 8, "regrade")
+	output = capsys.readouterr().out
+	assert (
+		"Protein_Images/semesters/spring_2026/"
+		"BCHM_Prot_Img_08_Membrane/output-protein_image_08.yml"
+	) in output
+	assert "../../../../" not in output

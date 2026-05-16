@@ -10,6 +10,7 @@ skipping with a warning.
 
 # Standard Library
 import argparse
+import pathlib
 
 # PIP3 modules
 import pytest
@@ -360,3 +361,51 @@ def test_merge_via_load_student_data_missing_yaml_path_raises(tmp_path,
 	}
 	with pytest.raises(FileNotFoundError):
 		gpi.load_student_data(params, {})
+
+
+def test_load_student_data_resume_print_uses_symlink_short_path(tmp_path,
+		monkeypatch, capsys):
+	real_root = tmp_path / "external"
+	repo_root = tmp_path / "repo"
+	protein_images_real = real_root / "Protein_Images"
+	protein_images_real.mkdir(parents=True)
+	repo_root.mkdir()
+	(repo_root / "Protein_Images").symlink_to(protein_images_real,
+		target_is_directory=True)
+	monkeypatch.chdir(repo_root)
+
+	form_tree = [_form_row("900000001")]
+	student_ids_tree = [_roster_row("900000001")]
+	yaml_path = (
+		protein_images_real / "semesters" / "spring_2026"
+		/ "BCHM_Prot_Img_01_Test" / "output-protein_image_01.yml"
+	)
+	yaml_path.parent.mkdir(parents=True)
+	yaml_path.write_text(yaml.safe_dump([_cached_yaml_row("900000001")]),
+		encoding="ascii")
+
+	monkeypatch.setattr(gpi.file_io_protein, "read_student_csv_data",
+		lambda _csv, _config: form_tree)
+	monkeypatch.setattr(gpi.file_io_protein, "read_student_ids",
+		lambda _csv: student_ids_tree)
+	monkeypatch.setattr(gpi.timestamp_tools, "check_due_date",
+		lambda _timestamp, _config: (0, "On-Time", ""))
+	monkeypatch.setattr(gpi.student_id_protein.time, "sleep",
+		lambda _seconds: None)
+
+	params = {
+		"args": argparse.Namespace(yaml_backup_file=str(yaml_path)),
+		"input_csv": "ignored.csv",
+		"image_number": 1,
+		"image_dir": str(yaml_path.parent),
+		"student_ids_csv": str(tmp_path / "roster.csv"),
+	}
+	pathlib.Path(params["student_ids_csv"]).write_text("", encoding="ascii")
+
+	gpi.load_student_data(params, {"deadline": {"due date": "Apr 16, 2026"}})
+	output = capsys.readouterr().out
+	assert (
+		"Resuming from Protein_Images/semesters/spring_2026/"
+		"BCHM_Prot_Img_01_Test/output-protein_image_01.yml"
+	) in output
+	assert "../../../../" not in output
