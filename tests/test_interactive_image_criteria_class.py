@@ -117,3 +117,44 @@ def test_gate_does_not_skip_when_field_absent(monkeypatch):
 	processor = _make_processor([student])
 	with pytest.raises(AssertionError):
 		processor.process_image_questions(student)
+
+
+def test_process_all_student_images_prints_blank_line_between_students(
+		monkeypatch, capsys):
+	students = [
+		_cached_student(**{
+			"Student ID": "900000001",
+			"Original Filename": "a.png",
+			"Image Assessment Complete": False,
+			"Consensus Background Color": "White",
+			"Image Format": "PNG",
+			"Exact Match": False,
+			"extra description": "",
+			"Warnings": [],
+		}),
+		_cached_student(**{
+			"Student ID": "900000002",
+			"Original Filename": "b.png",
+			"Image Assessment Complete": False,
+			"Consensus Background Color": "White",
+			"Image Format": "PNG",
+			"Exact Match": False,
+			"extra description": "",
+			"Warnings": [],
+		}),
+	]
+
+	def _print_student(student_entry):
+		print(f"Student {student_entry['Student ID']}")
+
+	monkeypatch.setattr(sip, "print_student_info", _print_student)
+	monkeypatch.setattr(sip, "get_input_validation",
+		lambda *_args, **_kwargs: "y")
+	processor = _make_processor(students)
+	processor.process_all_student_images()
+	output = capsys.readouterr().out
+	assert (
+		"Student 900000001\n"
+		".. Original Filename = a.png\n\n"
+		"Student 900000002"
+	) in output

@@ -481,6 +481,26 @@ def test_write_html_from_student_tree_makes_images_clickable(tmp_path):
 	assert f"src='{image_url}'" in html
 
 
+def test_student_html_separator_is_shared(tmp_path):
+	html_path = tmp_path / "protein_images_03.html"
+	student_tree = [
+		{
+			"Student ID": "900000001",
+			"First Name": "Alice",
+			"Last Name": "Smith",
+		},
+		{
+			"Student ID": "900000002",
+			"First Name": "Bob",
+			"Last Name": "Jones",
+		},
+	]
+	dsi.write_html_from_student_tree(student_tree, str(html_path))
+	html = html_path.read_text(encoding="utf-8")
+	assert dsi.student_html_separator().strip() in html
+	assert "<hr />\n<hr />" in html
+
+
 def test_generate_html_raises_on_unresolved_row(monkeypatch, tmp_path):
 	"""
 	An unresolved Form RUID means roster.csv is stale (or the typed

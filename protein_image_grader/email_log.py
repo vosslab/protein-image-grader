@@ -183,3 +183,38 @@ def summarize_image(data: dict, image_number: int,
 	if all_closed:
 		return "OK"
 	return "PARTIAL"
+
+
+#============================================
+def summarize_image_by_submission(data: dict, image_number: int,
+		roster_student_ids, submitted_student_ids) -> str:
+	"""
+	Compute email status when the dashboard knows who submitted.
+
+	Submitters must have `sent`; a stale `no_submission_sent` for a
+	student who later got graded is not acceptable. Roster students who did
+	not submit may close with any closing status, which preserves the
+	no-submission notice workflow.
+	"""
+	roster_ids = set(str(student_id) for student_id in roster_student_ids)
+	submitted_ids = set(str(student_id) for student_id in submitted_student_ids)
+	expected_ids = roster_ids | submitted_ids
+	if not expected_ids:
+		return "MISSING"
+
+	statuses = []
+	for student_id in expected_ids:
+		statuses.append(get_status(data, student_id, image_number))
+	any_status = any(status is not None for status in statuses)
+	if not any_status:
+		return "MISSING"
+
+	for student_id in submitted_ids:
+		status = get_status(data, student_id, image_number)
+		if status != "sent":
+			return "PARTIAL"
+	for student_id in expected_ids - submitted_ids:
+		status = get_status(data, student_id, image_number)
+		if status not in CLOSING_STATUSES:
+			return "PARTIAL"
+	return "OK"

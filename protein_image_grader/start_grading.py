@@ -254,6 +254,34 @@ def is_non_empty_dir(path: pathlib.Path) -> bool:
 
 
 #============================================
+def count_files_in_dir(path: pathlib.Path) -> int:
+	"""
+	Return the number of direct child files in `path`.
+	"""
+	if not path.is_dir():
+		return 0
+	count = 0
+	for child in path.iterdir():
+		if child.is_file():
+			count += 1
+	return count
+
+
+#============================================
+def image_processing_needed(image_dir: pathlib.Path, form_count: int) -> bool:
+	"""
+	Return True when raw or trim outputs are behind the form count.
+	"""
+	raw_count = count_files_in_dir(image_dir / "raw")
+	trim_count = count_files_in_dir(image_dir / "trim")
+	if raw_count < form_count:
+		return True
+	if trim_count < form_count:
+		return True
+	return False
+
+
+#============================================
 def build_status_row(image_number: int, term: str,
 		canonical_csvs: dict) -> dict:
 	"""
@@ -281,6 +309,10 @@ def build_status_row(image_number: int, term: str,
 
 	form_count = None
 	graded_count = None
+	graded_student_ids = None
+	downloaded_count = None
+	if form_status == "OK":
+		form_count = count_form_records(csv_matches[0], term)
 	# Checkpoint metadata for footer warnings: which file was picked,
 	# how many candidates exist, and -- on conflict -- the reason. The
 	# dashboard never prompts; ambiguity surfaces as footer text.
@@ -292,7 +324,8 @@ def build_status_row(image_number: int, term: str,
 		graded_status = "MISSING"
 		bb_status = "MISSING"
 	else:
-		downloaded_status = "OK" if is_non_empty_dir(image_dir / "raw") else "MISSING"
+		downloaded_count = count_files_in_dir(image_dir / "raw")
+		downloaded_status = "OK" if downloaded_count > 0 else "MISSING"
 		bb_csv = image_dir / f"blackboard_upload-protein_image_{image_number:02d}.csv"
 		bb_status = "OK" if bb_csv.is_file() else "MISSING"
 		# YAML is the source of truth for graded records (CSV is just
@@ -311,10 +344,12 @@ def build_status_row(image_number: int, term: str,
 			graded_count = grade_status.count_graded_students_from_yaml(
 				pick_result.chosen
 			)
+			graded_student_ids = grade_status.graded_student_ids_from_yaml(
+				pick_result.chosen
+			)
 			if graded_count == 0:
 				graded_status = "MISSING"
 			elif form_status == "OK":
-				form_count = count_form_records(csv_matches[0], term)
 				# Strict less-than -> PARTIAL. Equal stays OK.
 				# More-graded-than-form is handled in
 				# render_footer_warnings as a stale-output warning.
@@ -327,7 +362,10 @@ def build_status_row(image_number: int, term: str,
 				# OK / PARTIAL without it, so default OK on the count.
 				graded_status = "OK"
 
-	emailed_status = compute_emailed_status(term, image_number, graded_status)
+	emailed_status = compute_emailed_status(
+		term, image_number, graded_status,
+		graded_student_ids=graded_student_ids,
+	)
 
 	next_step = compute_next_step(form_status, downloaded_status,
 		graded_status, bb_status, emailed_status=emailed_status)
@@ -341,6 +379,7 @@ def build_status_row(image_number: int, term: str,
 		"bb_upload": bb_status,
 		"next_step": next_step,
 		"form_count": form_count,
+		"downloaded_count": downloaded_count,
 		"graded_count": graded_count,
 		"checkpoint_label": checkpoint_label,
 		"checkpoint_candidates": checkpoint_candidates,
@@ -350,19 +389,27 @@ def build_status_row(image_number: int, term: str,
 
 
 #============================================
+def status_cell(status: str, count: int | None) -> str:
+	"""
+	Render a dashboard status with a count when one is known.
+	"""
+	if count is None:
+		return status
+	return f"{status} ({count})"
+
+
+#============================================
 def compute_emailed_status(term: str, image_number: int,
-		graded_status: str) -> str:
+		graded_status: str, graded_student_ids=None) -> str:
 	"""
 	Compute the dashboard 'Emailed' column for one image.
 
 	Returns "MISSING" when grading has not happened yet (nothing to email)
-	or when the roster CSV is absent. Otherwise delegates to
-	email_log.summarize_image with the Student IDs taken from the per-term
-	`roster.csv`. Closing the cell to "OK" therefore requires every roster
-	Student ID to have status `sent` (real feedback) or
-	`no_submission_sent` (no-submission notice). The graded YAML is no
-	longer the source of expected IDs; submitters are a subset of the
-	roster, and the email step now also covers non-submitters.
+	or when the roster CSV is absent. When `graded_student_ids` is supplied,
+	graded submitters must have status `sent`; only roster students absent
+	from the graded YAML may close with `no_submission_sent`. This prevents
+	an old no-submission notice from marking a later-graded student as
+	emailed.
 	"""
 	if graded_status != "OK":
 		return "MISSING"
@@ -377,7 +424,11 @@ def compute_emailed_status(term: str, image_number: int,
 		return "MISSING"
 	expected_ids = [str(student_id) for student_id in roster.keys()]
 	data = email_log.load(term)
-	return email_log.summarize_image(data, image_number, expected_ids)
+	if graded_student_ids is None:
+		return email_log.summarize_image(data, image_number, expected_ids)
+	return email_log.summarize_image_by_submission(
+		data, image_number, expected_ids, graded_student_ids,
+	)
 
 
 #============================================
@@ -433,7 +484,11 @@ def render_dashboard(term: str) -> str:
 	headers = ["Image", "Form CSV", "Downloaded", "Graded",
 		"Emailed", "BB upload", "Next step"]
 	table_rows = [
-		[r["image"], r["form"], r["downloaded"], r["graded"],
+		[
+			r["image"],
+			status_cell(r["form"], r["form_count"]),
+			status_cell(r["downloaded"], r["downloaded_count"]),
+			status_cell(r["graded"], r["graded_count"]),
 			r["emailed"], r["bb_upload"], r["next_step"]]
 		for r in rows
 	]
@@ -613,6 +668,23 @@ def build_download_command(canonical_csv: pathlib.Path) -> list:
 
 
 #============================================
+def run_image_processing_if_needed(term: str, image_number: int,
+		canonical_csv: pathlib.Path) -> int:
+	"""
+	Run the downloader with trim/rotate when image files are incomplete.
+	"""
+	image_dir = protein_images_path.get_term_image_dir(term, image_number)
+	form_count = count_form_records(canonical_csv, term)
+	if not image_processing_needed(image_dir, form_count):
+		return 0
+	download_command = build_download_command(canonical_csv)
+	download_command_string = " ".join(download_command)
+	print(f"+ {download_command_string}")
+	download_result = subprocess.run(download_command)
+	return download_result.returncode
+
+
+#============================================
 def build_grade_command(image_number: int, term: str,
 		yaml_backup_file: pathlib.Path | None = None) -> list:
 	"""
@@ -702,19 +774,15 @@ def run_step(term: str, image_number: int, step: str) -> int:
 	canonical_csv = resolve_canonical_csv(term, image_number)
 
 	if step == "grade":
-		# Download is non-interactive, so auto-run it when the canonical
-		# raw/ subdir for this image is empty/missing. Existing non-empty
-		# downloads are kept as-is (no overwrite prompt) so re-runs do not
-		# re-fetch hundreds of images.
+		# Download/image processing is non-interactive. Run it whenever
+		# raw or trim outputs are behind the current form count so
+		# start_grading defaults to trimmed/rotated review images.
 		image_dir = protein_images_path.get_term_image_dir(term, image_number)
-		image_raw_dir = image_dir / "raw"
-		if not is_non_empty_dir(image_raw_dir):
-			download_command = build_download_command(canonical_csv)
-			download_command_string = " ".join(download_command)
-			print(f"+ {download_command_string}")
-			download_result = subprocess.run(download_command)
-			if download_result.returncode != 0:
-				return download_result.returncode
+		download_result = run_image_processing_if_needed(
+			term, image_number, canonical_csv
+		)
+		if download_result != 0:
+			return download_result
 		command = build_grade_command(image_number, term)
 		graded_csv = image_dir / f"output-protein_image_{image_number:02d}.csv"
 		if graded_csv.is_file():
@@ -754,6 +822,11 @@ def run_step(term: str, image_number: int, step: str) -> int:
 				f"Resuming from "
 				f"{file_io_protein._short_path(str(pick_result.chosen))}"
 			)
+		download_result = run_image_processing_if_needed(
+			term, image_number, canonical_csv
+		)
+		if download_result != 0:
+			return download_result
 		command = build_grade_command(
 			image_number, term, yaml_backup_file=pick_result.chosen
 		)

@@ -25,8 +25,15 @@ class process_image_questions_class():
 
 	#==========================================
 	def process_all_student_images(self):
+		printed_student = False
 		for student_entry in self.student_tree:
+			if grade_status.is_image_complete(
+					student_entry.get('Image Assessment Complete')):
+				continue
+			if printed_student is True:
+				print()
 			self.process_image_questions(student_entry)
+			printed_student = True
 
 	#==========================================
 	def quick_process_initial_image_validation(self, student_entry: dict, validation: str) -> bool:

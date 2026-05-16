@@ -17,6 +17,11 @@
 - `protein_image_grader/download_submission_images.py` visual-grading image tags are clickable again. Both downloader-generated and grader-generated `protein_images_NN.html` wrap raw and trimmed images in links to their full local `file://` URLs so clicking an image opens it for zooming.
 - `protein_image_grader/download_submission_images.py` clickable visual-grading image links now include `target='_blank' rel='noopener'` so raw and trimmed images open in a new window/tab.
 - `protein_image_grader/start_grading.py` and `protein_image_grader/grade_protein_image.py` now render resume checkpoint paths through the symlink-aware `file_io_protein._short_path` helper. Terminal output uses `Protein_Images/...` instead of unreadable `../../../../Volumes/...` paths when semester data is reached through the repo symlink.
+- `protein_image_grader/start_grading.py` email completion is now submitter-aware. Dashboard rows pass graded Student IDs from the chosen checkpoint into `email_log.summarize_image_by_submission`, so a stale `no_submission_sent` cell no longer closes a student who later submitted and was graded; graded submitters require `sent`, while true non-submitters may still close with `no_submission_sent`.
+- `protein_image_grader/start_grading.py` dashboard status cells now show counts when known: Form CSV displays unique submitter count, Downloaded displays direct raw-image file count, and Graded displays completed YAML-row count, for example `OK (11)`.
+- `protein_image_grader/start_grading.py` now runs the downloader's trim/rotate image-processing pass before both `grade` and `regrade` whenever raw images or trimmed companions are behind the current form count. The orchestrator already passes `--trim --rotate`; this extends that default to late-submission regrades where `raw/` was non-empty and the downloader was previously skipped.
+- `protein_image_grader/grade_protein_image.py` now prints a final CLI score summary after `Calculating Final Scores`, once scores have actually been computed and written into each student row.
+- `protein_image_grader/interactive_image_criteria_class.py` now prints one blank line between interactive student image-question chunks so the next student's prompt is visually separated from the previous student's final answer.
 
 ### Developer Tests and Notes
 - `tests/test_start_grading.py` superset-collision coverage now monkeypatches `os.replace` to assert the final atomic replace uses a source temp file in the same directory as the destination CSV.
@@ -33,6 +38,10 @@
 - `tests/test_download_submission_images.py` now covers clickable image links in grader-generated visual HTML.
 - `tests/test_download_submission_images.py` now asserts clickable visual HTML image links open with `target='_blank'`.
 - `tests/test_start_grading.py` and `tests/test_grade_protein_image.py` now cover symlink-shortened resume checkpoint output.
+- `tests/test_grade_status.py`, `tests/test_email_log.py`, and `tests/test_start_grading.py` now cover the graded-student ID extraction and stale no-submission-email case where a later-graded submitter must remain `PARTIAL` until real feedback is sent.
+- `tests/test_start_grading.py` now covers dashboard rendering of counted status cells such as `OK (11)`.
+- `tests/test_start_grading.py` now covers the trim/rotate downloader argv and the regrade path that runs the downloader before grading when raw images are behind the form count.
+- `tests/test_grade_protein_image.py` covers score-line formatting as a small pure helper, and `tests/test_interactive_image_criteria_class.py` covers the requested blank line between image-question student chunks.
 
 ## 2026-05-10
 

@@ -63,6 +63,14 @@ def _roster_row(sid, first="Pat", last="Roe", username="patroe"):
 	}
 
 
+# ---- score reporting ------------------------------------------------------
+
+def test_format_score_line_uses_final_score():
+	row = _cached_yaml_row("900000001", **{"Final Score": "4.70"})
+	line = gpi.format_score_line(row)
+	assert line == "Student 900000001: Pat Roe = 4.70"
+
+
 # ---- _collapse_form_to_newest_submissions --------------------------------
 
 def test_collapse_form_keeps_newest_duplicate_student_id(capsys):

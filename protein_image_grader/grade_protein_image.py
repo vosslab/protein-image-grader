@@ -345,6 +345,29 @@ def get_final_score(student_entry: dict, read_only_config_dict: dict) -> None:
 
 
 #==========================================
+def format_score_line(student_entry: dict) -> str:
+	"""
+	Build one CLI grade-summary line for a student.
+	"""
+	student_id = student_entry["Student ID"]
+	first_name = student_entry["First Name"]
+	last_name = student_entry["Last Name"]
+	final_score = student_entry["Final Score"]
+	line = f"Student {student_id}: {first_name} {last_name} = {final_score}"
+	return line
+
+
+#==========================================
+def print_final_scores(student_tree: list) -> None:
+	"""
+	Print final scores after all grading calculations are complete.
+	"""
+	console.print("\nFinal Scores", style=data_color)
+	for student_entry in student_tree:
+		console.print(format_score_line(student_entry))
+
+
+#==========================================
 #==========================================
 #==========================================
 def parse_args() -> argparse.Namespace:
@@ -1044,6 +1067,7 @@ def process_data(student_tree: list, params: dict, read_only_config_dict: dict) 
 	console.print("\nCalculating Final Scores")
 	for student_entry in student_tree:
 		get_final_score(student_entry, read_only_config_dict)
+	print_final_scores(student_tree)
 	console.print('DONE Processing Data\n\n')
 
 #============================================

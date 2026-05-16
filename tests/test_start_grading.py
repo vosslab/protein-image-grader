@@ -280,6 +280,31 @@ def test_compute_emailed_status_closes_against_roster(tmp_path, monkeypatch):
 	assert sg.compute_emailed_status("spring_2026", 1, "OK") == "OK"
 
 
+def test_compute_emailed_status_rejects_no_submission_for_submitter(
+		tmp_path, monkeypatch):
+	import protein_image_grader.email_log as _email_log
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n"
+		"Alice,Aaa,alice,900000001,\n"
+		"Bob,Bbb,bob,900000002,\n",
+		encoding="ascii",
+	)
+	data = {}
+	_email_log.set_status(data, "900000001", 1, "no_submission_sent", "t",
+		"alice", "alice@mail.roosevelt.edu")
+	_email_log.set_status(data, "900000002", 1, "no_submission_sent", "t",
+		"bob", "bob@mail.roosevelt.edu")
+	_email_log.save("spring_2026", data)
+	status = sg.compute_emailed_status(
+		"spring_2026", 1, "OK",
+		graded_student_ids={"900000001"},
+	)
+	assert status == "PARTIAL"
+
+
 # ---- command construction -------------------------------------------------
 
 def test_build_download_command_uses_canonical_csv():
@@ -293,6 +318,8 @@ def test_build_download_command_uses_canonical_csv():
 	# No --output-dir: downloader infers from canonical CSV path.
 	assert "--output-dir" not in cmd
 	assert "-o" not in cmd
+	assert "--trim" in cmd
+	assert "--rotate" in cmd
 
 
 def test_build_grade_command_passes_term():
@@ -572,6 +599,47 @@ def test_compute_next_step_partial_routes_to_regrade():
 		emailed_status="OK",
 	)
 	assert step == "regrade"
+
+
+def test_image_processing_needed_when_raw_or_trim_behind(tmp_path):
+	image_dir = tmp_path / "image_08"
+	(image_dir / "raw").mkdir(parents=True)
+	(image_dir / "trim").mkdir()
+	(image_dir / "raw" / "a.png").write_text("", encoding="ascii")
+	assert sg.image_processing_needed(image_dir, 2) is True
+	(image_dir / "raw" / "b.png").write_text("", encoding="ascii")
+	assert sg.image_processing_needed(image_dir, 2) is True
+	(image_dir / "trim" / "a-trim.jpg").write_text("", encoding="ascii")
+	(image_dir / "trim" / "b-trim.jpg").write_text("", encoding="ascii")
+	assert sg.image_processing_needed(image_dir, 2) is False
+
+
+def test_render_dashboard_shows_counts_in_status_cells(monkeypatch):
+	monkeypatch.setattr(sg, "EXPECTED_IMAGE_NUMBERS", (8,))
+	monkeypatch.setattr(sg, "find_canonical_form_csvs",
+		lambda term: {})
+	monkeypatch.setattr(sg, "render_header_banner",
+		lambda term: "header\n")
+	monkeypatch.setattr(sg, "render_footer_warnings",
+		lambda term, rows=None: "")
+
+	def _row(_image_number, _term, _canonical_csvs):
+		return {
+			"image": "08",
+			"form": "OK",
+			"downloaded": "OK",
+			"graded": "OK",
+			"emailed": "OK",
+			"bb_upload": "OK",
+			"next_step": "done",
+			"form_count": 11,
+			"downloaded_count": 11,
+			"graded_count": 11,
+		}
+
+	monkeypatch.setattr(sg, "build_status_row", _row)
+	output = sg.render_dashboard("spring_2026")
+	assert "OK (11)" in output
 
 
 def test_render_footer_warnings_lists_partial_image(tmp_path, monkeypatch):
@@ -1051,6 +1119,47 @@ def test_run_step_regrade_passes_output_yml_to_grader(tmp_path, monkeypatch):
 	assert "--yaml-backup-file" in argv
 	idx = argv.index("--yaml-backup-file")
 	assert argv[idx + 1] == str(output_yaml)
+
+
+def test_run_step_regrade_runs_trim_rotate_downloader_when_raw_behind(
+		tmp_path, monkeypatch):
+	_install_fake_repo_root(monkeypatch, tmp_path)
+	skel = _make_term_skeleton(tmp_path, "spring_2026")
+	form_csv = pip.get_forms_dir("spring_2026") / "BCHM_Prot_Img_08-Membrane.csv"
+	pip.get_forms_dir("spring_2026").mkdir(parents=True, exist_ok=True)
+	form_csv.write_text(
+		_form_csv_with_records(["900000001", "900000002"], "PM"),
+		encoding="ascii",
+	)
+	image_dir = pip.get_term_image_dir("spring_2026", 8)
+	image_dir.mkdir(parents=True, exist_ok=True)
+	(image_dir / "raw").mkdir()
+	(image_dir / "raw" / "900000001-protein08-a.png").write_text("",
+		encoding="ascii")
+	output_yaml = image_dir / "output-protein_image_08.yml"
+	output_yaml.write_text(
+		_output_yaml_complete_for(["900000001"], 8),
+		encoding="ascii",
+	)
+	roster_csv = skel["term_dir"] / pip.ROSTER_FILENAME
+	roster_csv.write_text(
+		"First Name,Last Name,Username,Student ID,Alias\n",
+		encoding="ascii",
+	)
+	commands = []
+
+	def _capture_subprocess(argv, *_a, **_k):
+		commands.append(argv)
+		return types.SimpleNamespace(returncode=0)
+
+	monkeypatch.setattr("subprocess.run", _capture_subprocess)
+	exit_code = sg.run_step("spring_2026", 8, "regrade")
+	assert exit_code == 0
+	assert len(commands) == 2
+	assert commands[0][1] == sg.DOWNLOAD_SCRIPT
+	assert "--trim" in commands[0]
+	assert "--rotate" in commands[0]
+	assert commands[1][1] == sg.GRADE_SCRIPT
 
 
 def test_run_step_regrade_echo_uses_symlink_short_path(tmp_path,

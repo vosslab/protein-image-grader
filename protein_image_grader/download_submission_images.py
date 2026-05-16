@@ -548,7 +548,7 @@ def generate_html(csvfile: str, header: list, data_tree: list, args, image_dir: 
 			count += 1
 
 			if count > 1:
-				output.write('<br/><p style="page-break-before: always"><br/></p>\n')
+				output.write(student_html_separator())
 
 			# Resolve the Roster RUID once per row, before any image is saved.
 			form_ruid = _extract_form_ruid_from_row(row, header, col_student_id_idx)
@@ -618,6 +618,18 @@ def open_html_in_browser(html_path: str):
 	Open the generated HTML file in a web browser.
 	"""
 	os.system(f"open {html_path}")
+
+#============================================
+def student_html_separator() -> str:
+	"""
+	Return the HTML separator between student blocks.
+	"""
+	separator = (
+		"<hr />\n<hr />\n"
+		'<br/><p style="page-break-before: always"><br/></p>\n'
+	)
+	return separator
+
 
 #============================================
 def _submission_history_by_student(all_submissions: list | None) -> dict:
@@ -692,10 +704,7 @@ def write_html_from_student_tree(student_tree: list, output_html: str,
 		for student_entry in student_tree:
 			count += 1
 			if count > 1:
-				output.write(
-					"<hr />\n<hr />\n"
-					'<br/><p style="page-break-before: always"><br/></p>\n'
-				)
+				output.write(student_html_separator())
 
 			student_id = student_entry.get('Student ID', '')
 			first_name = student_entry.get('First Name', '')

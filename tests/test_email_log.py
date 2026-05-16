@@ -186,6 +186,32 @@ def test_summarize_image_ok_when_mixed_sent_and_no_submission_sent():
 	assert email_log.summarize_image(data, 1, expected) == "OK"
 
 
+def test_summarize_image_by_submission_rejects_stale_no_submission():
+	data = {}
+	email_log.set_status(data, "900646199", 1, "no_submission_sent", "t",
+		"adarbanova", "adarbanova@mail.roosevelt.edu")
+	email_log.set_status(data, "900620160", 1, "no_submission_sent", "t",
+		"cvirgen", "cvirgen@mail.roosevelt.edu")
+	roster_ids = ["900646199", "900620160"]
+	submitted_ids = ["900646199"]
+	assert email_log.summarize_image_by_submission(
+		data, 1, roster_ids, submitted_ids
+	) == "PARTIAL"
+
+
+def test_summarize_image_by_submission_allows_non_submitter_notice():
+	data = {}
+	email_log.set_status(data, "900646199", 1, "sent", "t",
+		"adarbanova", "adarbanova@mail.roosevelt.edu")
+	email_log.set_status(data, "900620160", 1, "no_submission_sent", "t",
+		"cvirgen", "cvirgen@mail.roosevelt.edu")
+	roster_ids = ["900646199", "900620160"]
+	submitted_ids = ["900646199"]
+	assert email_log.summarize_image_by_submission(
+		data, 1, roster_ids, submitted_ids
+	) == "OK"
+
+
 def test_summarize_image_partial_when_no_submission_dry_run_present():
 	# A dry-run cell among non-submitters still forces PARTIAL.
 	data = {}

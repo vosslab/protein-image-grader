@@ -213,6 +213,19 @@ def test_count_graded_students_from_yaml_counts_only_complete(tmp_path):
 	assert grade_status.count_graded_students_from_yaml(path) == 3
 
 
+def test_graded_student_ids_from_yaml_returns_only_complete_ids(tmp_path):
+	path = tmp_path / "output-protein_image_01.yml"
+	rows = [
+		_complete_entry("900000001"),
+		_complete_entry("900000002",
+			**{"Image Assessment Complete": False}),
+		_complete_entry("900000003"),
+	]
+	_write_yaml(path, rows)
+	student_ids = grade_status.graded_student_ids_from_yaml(path)
+	assert student_ids == {"900000001", "900000003"}
+
+
 def test_count_graded_students_from_yaml_accepts_string_true(tmp_path):
 	# A historical YAML written with string-typed booleans should still count.
 	path = tmp_path / "output-protein_image_01.yml"

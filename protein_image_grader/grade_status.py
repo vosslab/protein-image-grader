@@ -324,3 +324,30 @@ def count_graded_students_from_yaml(yaml_path: pathlib.Path) -> int:
 		if is_image_complete(entry.get("Image Assessment Complete")):
 			count += 1
 	return count
+
+
+#============================================
+def graded_student_ids_from_yaml(yaml_path: pathlib.Path) -> set:
+	"""Return Student IDs whose image-question grading is complete.
+
+	This mirrors `count_graded_students_from_yaml`, but returns the actual
+	Student IDs so callers can compare downstream state against submitters
+	instead of just comparing counts.
+
+	Args:
+		yaml_path: Path to a checkpoint YAML file.
+
+	Returns:
+		Set of canonical Student ID strings for completed image rows.
+
+	Raises:
+		ValueError: when the file fails `validate_checkpoint`.
+	"""
+	with open(yaml_path, "r", encoding="utf-8") as handle:
+		loaded = yaml.safe_load(handle)
+	validate_checkpoint(loaded)
+	student_ids = set()
+	for entry in loaded:
+		if is_image_complete(entry.get("Image Assessment Complete")):
+			student_ids.add(student_key(entry))
+	return student_ids
